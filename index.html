@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>สแกนบัตร TRB Symposium</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Layout: full-screen camera with a result sheet that takes over the whole screen in a status colour */
+  :root { --bg:#0f1a2b; --panel:#17263d; --fg:#f2f5f9; --muted:#9fb0c6; --line:#2a3b56; --blue:#3b7ddd; --pink:#e0407f;
+          --ok:#1b8a4a; --bad:#c0392b; --warn:#b7791f; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; margin:0; }
+  body { font-family:'Sarabun',system-ui,sans-serif; background:var(--bg); color:var(--fg); overflow:hidden; }
+  .screen { position:fixed; inset:0; display:flex; flex-direction:column; }
+  .top { padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 8px; display:flex; align-items:center; gap:10px; background:var(--panel); }
+  .top .ev { font-weight:700; font-size:15px; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pill { font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:3px 9px; white-space:nowrap; }
+  .pill b { color:var(--fg); }
+  .iconbtn { background:none; border:1px solid var(--line); color:var(--fg); border-radius:8px; padding:5px 9px; font:inherit; font-size:13px; }
+  .cam { position:relative; flex:1; background:#000; overflow:hidden; }
+  video { width:100%; height:100%; object-fit:cover; display:block; }
+  .frame { position:absolute; left:50%; top:50%; width:min(68vw,320px); aspect-ratio:1; transform:translate(-50%,-50%); border:3px solid rgba(255,255,255,.85); border-radius:16px; box-shadow:0 0 0 9999px rgba(0,0,0,.35); }
+  .hint { position:absolute; left:0; right:0; bottom:14px; text-align:center; color:#fff; font-size:14px; text-shadow:0 1px 3px rgba(0,0,0,.8); padding:0 16px; }
+  .bottom { background:var(--panel); padding:10px 14px calc(env(safe-area-inset-bottom,0px) + 12px); display:flex; flex-direction:column; gap:8px; }
+  .manual { display:flex; gap:8px; }
+  .manual input { flex:1; min-width:0; font:inherit; font-size:18px; letter-spacing:1px; text-transform:uppercase; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  .btn { font:inherit; font-weight:700; border:0; border-radius:10px; padding:11px 16px; cursor:pointer; background:var(--blue); color:#fff; }
+  .btn.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  .hist { display:flex; flex-direction:column; gap:4px; max-height:112px; overflow:auto; font-size:13px; }
+  .hist div { display:flex; gap:8px; align-items:center; color:var(--muted); }
+  .hist .dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
+  .hist .code { color:var(--fg); font-weight:700; font-variant-numeric:tabular-nums; }
+  /* result sheet */
+  .result { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; color:#fff; z-index:10; }
+  .result.show { display:flex; }
+  .result .big { font-size:30px; font-weight:800; line-height:1.15; text-wrap:balance; }
+  .result .name { font-size:24px; font-weight:700; margin-top:10px; }
+  .result .code { font-size:22px; font-weight:800; letter-spacing:2px; margin-top:14px; font-variant-numeric:tabular-nums; }
+  .result .sub { font-size:16px; opacity:.9; margin-top:8px; }
+  .result .tap { position:absolute; bottom:calc(env(safe-area-inset-bottom,0px) + 22px); font-size:14px; opacity:.85; }
+  .result .clock { font-size:18px; font-variant-numeric:tabular-nums; margin-top:14px; opacity:.9; }
+  .ok { background:var(--ok); } .bad { background:var(--bad); } .warn { background:var(--warn); } .busy { background:#2d3e5a; }
+  /* setup */
+  .setup { position:fixed; inset:0; background:var(--bg); z-index:20; display:none; flex-direction:column; padding:calc(env(safe-area-inset-top,0px) + 24px) 20px 24px; gap:14px; overflow:auto; }
+  .setup.show { display:flex; }
+  .setup h1 { font-size:22px; margin:0; }
+  .setup p { margin:0; color:var(--muted); font-size:14px; line-height:1.4; }
+  .setup label { font-size:13px; color:var(--muted); display:block; margin-bottom:4px; }
+  .setup input, .setup select { width:100%; font:inherit; font-size:18px; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--fg); }
+  .err { color:#ff8a8a; font-size:14px; min-height:1.2em; }
+  @media (prefers-reduced-motion: no-preference) { .result.show { animation:pop .18s ease-out; } @keyframes pop { from { opacity:.3; transform:scale(.98);} to { opacity:1; transform:none; } } }
+</style>
+</head>
+<body>
+
+<div class="setup show" id="setup">
+  <h1>สแกนบัตรรับของที่ระลึก</h1>
+  <p>สำหรับเจ้าหน้าที่จุดแลกของ · ใส่ PIN แล้วกดเริ่ม กล้องจะเปิดค้างไว้ ยกบัตรเข้าหน้ากล้องทีละใบ</p>
+  <div><label for="api">ที่อยู่ระบบ (API URL — ผู้ดูแลตั้งให้แล้ว แก้เฉพาะเมื่อผู้ดูแลแจ้ง)</label><input id="api" type="url" autocomplete="off" spellcheck="false"></div>
+  <div><label for="pin">PIN เจ้าหน้าที่</label><input id="pin" type="password" inputmode="numeric" autocomplete="off"></div>
+  <div><label for="lane">ช่องแลกของ (เครื่องนี้)</label>
+    <select id="lane"><option value="M1">มือถือ 1</option><option value="M2">มือถือ 2</option><option value="M3">มือถือ 3</option><option value="M4">มือถือ 4</option></select></div>
+  <div class="err" id="setupErr"></div>
+  <button class="btn" id="startBtn" onclick="start()">เริ่มสแกน</button>
+  <p>ใช้ได้ทั้ง iPhone และ Android · เปิดจากเบราว์เซอร์ปกติ ครั้งแรกจะถามสิทธิ์ใช้กล้อง ให้กด "อนุญาต"</p>
+</div>
+
+<div class="screen" id="screen">
+  <div class="top">
+    <div class="ev" id="evName">TRB Symposium</div>
+    <div class="pill">รับแล้ว <b id="cRedeemed">–</b> / เหลือ <b id="cLeft">–</b></div>
+    <button class="iconbtn" onclick="openSetup()">ตั้งค่า</button>
+  </div>
+  <div class="cam">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="frame"></div>
+    <div class="hint" id="hint">เล็ง QR บนบัตรให้อยู่ในกรอบ</div>
+  </div>
+  <div class="bottom">
+    <div class="manual">
+      <input id="manual" placeholder="หรือพิมพ์รหัส เช่น S057-K7QX" autocapitalize="characters" autocomplete="off">
+      <button class="btn" onclick="manualGo()">ตรวจ</button>
+    </div>
+    <div class="hist" id="hist"></div>
+  </div>
+</div>
+
+<div class="result" id="result" onclick="closeResult()">
+  <div class="big" id="rBig"></div>
+  <div class="name" id="rName"></div>
+  <div class="code" id="rCode"></div>
+  <div class="sub" id="rSub"></div>
+  <div class="clock" id="rClock"></div>
+  <div class="tap">แตะเพื่อสแกนใบต่อไป</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script>
+  var DEFAULT_API = 'https://script.google.com/macros/s/AKfycbx-Lp7HZ-pC85wT38CYtdH5D9css-n0nSI7npU8N_Ixx96N4EA7T-7b6dUkAOnrfftJaw/exec';
+  var cfg = { api: DEFAULT_API, pin: '', lane: 'M1' };
+  try { var saved = JSON.parse(localStorage.getItem('scanCfg') || '{}'); if (saved.pin) cfg = saved; } catch (e) {}
+  if (!cfg.api || /__API/.test(cfg.api)) cfg.api = DEFAULT_API;
+  document.getElementById('api').value = cfg.api || '';
+  document.getElementById('pin').value = cfg.pin || '';
+  document.getElementById('lane').value = cfg.lane || 'M1';
+
+  // เรียก Apps Script แบบไม่แนบคุกกี้ (fetch) ถ้าเบราว์เซอร์ไม่ยอมให้ข้ามโดเมน ใช้ JSONP สำรอง
+  function api(P) {
+    var base = (cfg.api || '').split('?')[0];
+    var qs = Object.keys(P).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(P[k]); }).join('&');
+    return fetch(base + '?' + qs, { method: 'GET', redirect: 'follow', credentials: 'omit', cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .catch(function () {
+        return new Promise(function (resolve, reject) {
+          var cb = 'cb' + Date.now() + Math.floor(Math.random() * 1e6);
+          var sc = document.createElement('script');
+          var timer = setTimeout(function () { cleanup(); reject(new Error('หมดเวลาเชื่อมต่อ')); }, 15000);
+          function cleanup() { clearTimeout(timer); delete window[cb]; if (sc.parentNode) sc.parentNode.removeChild(sc); }
+          window[cb] = function (d) { cleanup(); resolve(d); };
+          sc.onerror = function () { cleanup(); reject(new Error('เชื่อมต่อระบบไม่ได้')); };
+          sc.src = base + '?' + qs + '&callback=' + cb;
+          document.head.appendChild(sc);
+        });
+      });
+  }
+
+  var video = document.getElementById('video'), stream = null, scanning = false, busy = false;
+  var lastCode = '', lastAt = 0, detector = null, canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+  var audioCtx = null, resultTimer = null, clockTimer = null;
+
+  function openSetup() { stopCam(); document.getElementById('setup').classList.add('show'); }
+
+  function start() {
+    cfg.api = document.getElementById('api').value.trim();
+    cfg.pin = document.getElementById('pin').value.trim();
+    cfg.lane = document.getElementById('lane').value;
+    var err = document.getElementById('setupErr');
+    if (!/^https:\/\/script\.google\.com\/macros\//.test(cfg.api)) { err.textContent = 'ที่อยู่ระบบไม่ถูกต้อง (ต้องขึ้นต้นด้วย https://script.google.com/macros/)'; return; }
+    if (!cfg.pin) { err.textContent = 'กรุณาใส่ PIN'; return; }
+    err.textContent = 'กำลังตรวจ PIN…';
+    document.getElementById('startBtn').disabled = true;
+    api({ action: 'ping', pin: cfg.pin }).then(function (r) {
+      document.getElementById('startBtn').disabled = false;
+      if (!r.ok) { err.textContent = r.error || 'PIN ไม่ถูกต้อง'; return; }
+      if (r.event) document.getElementById('evName').textContent = r.event;
+      try { localStorage.setItem('scanCfg', JSON.stringify(cfg)); } catch (e) {}
+      updateCounts(r);
+      err.textContent = '';
+      document.getElementById('setup').classList.remove('show');
+      try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+      startCam();
+    }).catch(function (e) { document.getElementById('startBtn').disabled = false; err.textContent = 'เชื่อมต่อไม่ได้: ' + e.message; });
+  }
+
+  function updateCounts(r) {
+    if (r.redeemed == null) return;
+    document.getElementById('cRedeemed').textContent = r.redeemed;
+    document.getElementById('cLeft').textContent = Math.max(0, (r.limit || 0) - (r.passed || 0) - (r.redeemed || 0));
+  }
+
+  function startCam() {
+    var hint = document.getElementById('hint');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { hint.textContent = 'เบราว์เซอร์นี้เปิดกล้องไม่ได้ – พิมพ์รหัสด้านล่างแทน'; return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+      .then(function (s) {
+        stream = s; video.srcObject = s; scanning = true;
+        if ('BarcodeDetector' in window) { try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; } }
+        hint.textContent = 'เล็ง QR บนบัตรให้อยู่ในกรอบ';
+        requestAnimationFrame(tick);
+      })
+      .catch(function (e) { hint.textContent = 'เปิดกล้องไม่ได้ (' + e.name + ') – อนุญาตกล้องในเบราว์เซอร์ หรือพิมพ์รหัสด้านล่าง'; });
+  }
+  function stopCam() { scanning = false; if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; } }
+
+  var frameN = 0;
+  function tick() {
+    if (!scanning) return;
+    frameN++;
+    if (!busy && video.readyState === 4 && frameN % 3 === 0) {
+      if (detector) {
+        detector.detect(video).then(function (codes) { if (codes && codes.length) onDecoded(codes[0].rawValue); }).catch(function () {});
+      } else if (window.jsQR) {
+        var w = 480, h = Math.round(480 * video.videoHeight / video.videoWidth) || 480;
+        canvas.width = w; canvas.height = h; ctx.drawImage(video, 0, 0, w, h);
+        var img = ctx.getImageData(0, 0, w, h);
+        var q = jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' });
+        if (q && q.data) onDecoded(q.data);
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // ดึงรหัสออกจากสิ่งที่สแกนได้ (ลิงก์ฟอร์ม / ลิงก์เว็บแอป / รหัสล้วน)
+  function extractCode(raw) {
+    raw = String(raw || '').trim();
+    var m = raw.match(/(?:^|[?&])(?:entry\.\d+|code|k|c)=([^&#\s]+)/i);
+    if (m) { try { raw = decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (e) { raw = m[1]; } }
+    raw = raw.toUpperCase().replace(/\s+/g, '');
+    var m2 = raw.match(/([A-Z]+\d{3})-?([A-Z0-9]{4})/);
+    return m2 ? m2[1] + '-' + m2[2] : '';
+  }
+
+  function onDecoded(raw) {
+    var code = extractCode(raw);
+    if (!code) return;
+    var now = Date.now();
+    if (code === lastCode && now - lastAt < 6000) return;   // กันสแกนซ้ำใบเดิมติดกัน
+    lastCode = code; lastAt = now;
+    redeem(code);
+  }
+
+  function manualGo() {
+    var code = extractCode(document.getElementById('manual').value);
+    if (!code) { document.getElementById('manual').value = ''; document.getElementById('manual').placeholder = 'รูปแบบรหัสไม่ถูกต้อง'; return; }
+    document.getElementById('manual').value = '';
+    document.getElementById('manual').blur();
+    redeem(code);
+  }
+
+  function redeem(code) {
+    busy = true;
+    showResult('busy', 'กำลังตรวจ…', '', code, '');
+    api({ action: 'redeem', code: code, pin: cfg.pin, lane: cfg.lane }).then(function (r) {
+      busy = false;
+      if (!r) { showResult('warn', 'ไม่มีการตอบกลับ', '', code, 'ลองอีกครั้ง'); return; }
+      if (r.error) { showResult('warn', r.error, '', code, ''); beep(false); return; }
+      if (r.state === 'redeemed_now') { showResult('ok', '✅ มอบของได้', r.name, r.code, 'ตอบถูก ' + (r.score || '') + ' · บันทึกเวลาแล้ว'); beep(true); }
+      else if (r.state === 'already') { showResult('bad', '❌ รับไปแล้ว', r.name, r.code, 'เมื่อ ' + (r.at || '')); beep(false); }
+      else if (r.state === 'notfound') { showResult('bad', '❌ ไม่พบรหัสนี้', '', r.code, 'ตรวจสอบบัตรกับเจ้าหน้าที่'); beep(false); }
+      else { showResult('warn', '⚠ ยังไม่ผ่าน', r.name, r.code, 'ให้ผู้เข้าร่วมสแกน QR ตอบคำถามก่อน'); beep(false); }
+      addHist(r.state, r.code, r.name);
+      if (r.state === 'redeemed_now') { var c = document.getElementById('cRedeemed'); if (c.textContent !== '–') { c.textContent = Number(c.textContent) + 1; var l = document.getElementById('cLeft'); } }
+    }).catch(function (e) { busy = false; showResult('warn', 'เชื่อมต่อไม่ได้', '', code, e.message + ' – ลองใหม่'); });
+  }
+
+  function showResult(kind, big, name, code, sub) {
+    var el = document.getElementById('result');
+    el.className = 'result show ' + kind;
+    document.getElementById('rBig').textContent = big;
+    document.getElementById('rName').textContent = name || '';
+    document.getElementById('rCode').textContent = code || '';
+    document.getElementById('rSub').textContent = sub || '';
+    if (clockTimer) clearInterval(clockTimer);
+    var ck = document.getElementById('rClock');
+    function tickClock() { var n = new Date(); ck.textContent = [n.getHours(), n.getMinutes(), n.getSeconds()].map(function (x) { return ('0' + x).slice(-2); }).join(':'); }
+    tickClock(); clockTimer = setInterval(tickClock, 1000);
+    if (resultTimer) clearTimeout(resultTimer);
+    if (kind !== 'busy') resultTimer = setTimeout(closeResult, kind === 'ok' ? 3500 : 6000);
+    if (navigator.vibrate) navigator.vibrate(kind === 'ok' ? 120 : [80, 60, 80]);
+  }
+  function closeResult() { if (busy) return; document.getElementById('result').className = 'result'; if (clockTimer) clearInterval(clockTimer); }
+
+  function beep(good) {
+    if (!audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = good ? 1046 : 330; g.gain.value = 0.25;
+      o.connect(g); g.connect(audioCtx.destination); o.start();
+      o.stop(audioCtx.currentTime + (good ? 0.18 : 0.4));
+    } catch (e) {}
+  }
+
+  var hist = [];
+  function addHist(state, code, name) {
+    var color = state === 'redeemed_now' ? 'var(--ok)' : (state === 'notpassed' ? 'var(--warn)' : 'var(--bad)');
+    var t = new Date(); var ts = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2);
+    hist.unshift({ color: color, code: code, name: name || '', ts: ts, state: state });
+    hist = hist.slice(0, 20);
+    document.getElementById('hist').innerHTML = hist.map(function (h) {
+      return '<div><span class="dot" style="background:' + h.color + '"></span><span>' + h.ts + '</span><span class="code">' + esc(h.code) + '</span><span>' +
+        esc(h.state === 'redeemed_now' ? 'มอบแล้ว' : h.state === 'already' ? 'รับไปแล้ว' : h.state === 'notfound' ? 'ไม่พบ' : 'ยังไม่ผ่าน') + '</span><span>' + esc(h.name) + '</span></div>';
+    }).join('');
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  document.getElementById('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') manualGo(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) stopCam(); else if (!document.getElementById('setup').classList.contains('show') && !stream) startCam(); });
+</script>
+</body>
+</html>
