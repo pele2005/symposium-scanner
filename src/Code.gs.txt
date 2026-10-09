@@ -1,0 +1,974 @@
+/**
+ * ระบบตอบคำถามรับของที่ระลึก งาน Symposium
+ * Google Sheet + Google Form + Apps Script (ฟรี)
+ *
+ * ชีตที่ใช้:
+ *   ตั้งค่า   – ค่าต่าง ๆ ของงาน (แก้ได้ในคอลัมน์ B)
+ *   คำถาม    – คำถาม / ตัวเลือก / คำตอบที่ถูก
+ *   รหัส     – รหัสบัตรทุกใบ + สถานะ (ข้อมูลหลักของระบบ)
+ *   บันทึก    – ทุกการส่งคำตอบ รวมที่ไม่ผ่าน พร้อมเหตุผล
+ *   สรุป     – ยอดสรุปแบบเรียลไทม์
+ */
+
+// ---------- ค่าคงที่ ----------
+var SH_SETTINGS = 'ตั้งค่า';
+var SH_QUESTIONS = 'คำถาม';
+var SH_CODES = 'รหัส';
+var SH_LOG = 'บันทึก';
+var SH_SUMMARY = 'สรุป';
+var SH_REDEEM = 'แลกของ';
+var SH_SCAN = 'สแกน';
+
+var ST_EMPTY = 'ว่าง';
+var ST_PASSED = 'ตอบผ่าน';
+var ST_REDEEMED = 'รับแล้ว';
+
+// คอลัมน์ในชีต "รหัส" (1-based)
+var C = { CODE: 1, STATUS: 2, NAME: 3, LICENSE: 4, PHONE: 5, EMAIL: 6, SCORE: 7, ANSWERED_AT: 8, REDEEMED_AT: 9, LINK: 10, NOTE: 11, THANKS: 12 };
+var CODE_HEADERS = ['รหัสบัตร', 'สถานะ', 'ชื่อ-นามสกุล', 'เลขใบประกอบวิชาชีพ', 'เบอร์โทร', 'อีเมล', 'คะแนน', 'เวลาตอบผ่าน', 'เวลารับของ', 'ลิงก์บัตร (ใช้พิมพ์ QR)', 'หมายเหตุ (ปล่อยผ่าน/ช่อง)', 'อีเมลขอบคุณ'];
+var TH_PENDING = 'รอส่ง';
+
+// ตัวอักษรที่ไม่สับสนกัน (ไม่มี 0/O, 1/I/L, 5/S, 8/B, 2/Z)
+var CODE_ALPHABET = 'ACDEFHJKMNPRTUVWXY34679';
+
+// ---------- เมนู ----------
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('🎁 Symposium')
+    .addItem('1) สร้างชีตตั้งค่าเริ่มต้น', 'initSheets')
+    .addItem('2) สร้าง Google Form จากชีต', 'createForm')
+    .addItem('3) สร้างรหัสบัตร', 'generateCodes')
+    .addItem('4) สร้างลิงก์บัตร (สำหรับพิมพ์ QR)', 'updateCardLinks')
+    .addSeparator()
+    .addItem('สร้างแท็บ "สแกน" (จุดแลกของแบบยิงบาร์โค้ด)', 'createScanSheet')
+    .addItem('สร้างแท็บสแกนเพิ่ม (ช่องที่ 2, 3)', 'createScanSheetsExtra')
+    .addItem('ดูสรุปยอด', 'showSummary')
+    .addSeparator()
+    .addItem('ส่งอีเมลขอบคุณที่ค้างอยู่ (ตอนนี้)', 'sendPendingThanksMenu')
+    .addItem('เปิดส่งอีเมลขอบคุณอัตโนมัติ (ทุก 5 นาที)', 'installThanksTrigger')
+    .addItem('ปิดส่งอีเมลขอบคุณอัตโนมัติ', 'removeThanksTrigger')
+    .addItem('เพิ่มค่าตั้งค่า/คอลัมน์ที่ขาด (หลังอัปเดตโค้ด)', 'ensureSchemaMenu')
+    .addSeparator()
+    .addItem('ตรวจคำตอบที่ตกหล่น', 'sweepMissedMenu')
+    .addItem('อัปเดตข้อความในฟอร์ม (ชื่องาน/ข้อความยืนยัน)', 'refreshFormText')
+    .addItem('เปิดรับคำตอบ', 'openForm')
+    .addItem('ปิดรับคำตอบ', 'closeForm')
+    .addToUi();
+}
+
+// ---------- 1) สร้างชีตเริ่มต้น ----------
+function initSheets() {
+  var ss = SpreadsheetApp.getActive();
+  var ui = SpreadsheetApp.getUi();
+
+  if (!ss.getSheetByName(SH_SETTINGS)) {
+    var s = ss.insertSheet(SH_SETTINGS);
+    var rows = [
+      ['KEY', 'ค่า', 'คำอธิบาย'],
+      ['EVENT_NAME', 'TRB Symposium 2026', 'ชื่องาน (แสดงบนฟอร์มและหน้าสถานะ)'],
+      ['PRIZE_LIMIT', 300, 'จำนวนของที่ระลึกทั้งหมด – ครบแล้วปิดฟอร์มอัตโนมัติ'],
+      ['CODE_COUNT', 300, 'จำนวนบัตร/รหัสที่จะสร้าง (ปกติเท่ากับจำนวนของ)'],
+      ['CODE_PREFIX', 'S', 'ตัวอักษรนำหน้ารหัส เช่น S → S057-K7QX'],
+      ['SECRET_WORD', '', 'คำลับที่ประกาศบนสไลด์ช่วงท้าย (เว้นว่าง = ไม่ใช้)'],
+      ['START_TIME', '', 'เวลาเริ่มรับคำตอบ เช่น 25/10/2026 15:00 (เว้นว่าง = ไม่จำกัด)'],
+      ['END_TIME', '', 'เวลาสิ้นสุดรับคำตอบ เช่น 25/10/2026 17:30 (เว้นว่าง = ไม่จำกัด)'],
+      ['MIN_SCORE', '', 'จำนวนข้อที่ต้องตอบถูกขั้นต่ำ (เว้นว่าง = ต้องถูกทุกข้อ, 0 = ไม่ตรวจ)'],
+      ['STAFF_PIN', '2468', 'PIN เจ้าหน้าที่ สำหรับกดยืนยันมอบของ (เปลี่ยนทุกงาน!)'],
+      ['SEND_EMAIL', 'FALSE', 'TRUE = ส่งอีเมลผลจากสคริปต์ (ติดโควตา 100–1,500 ฉบับ/วัน) – ปกติปล่อย FALSE แล้วใช้ "ส่งสำเนาคำตอบ" ในตั้งค่าฟอร์มแทน'],
+      ['ASK_LICENSE', 'TRUE', 'TRUE = ถามเลขใบประกอบวิชาชีพ และใช้กันรับซ้ำ'],
+      ['THANKS_EMAIL', 'FALSE', 'TRUE = ส่งอีเมลขอบคุณ+ยืนยันการรับของ หลังสแกนรับของ (ใช้โควตาสคริปต์ 100 ฉบับ/วันช่วงทดลอง Workspace, 1,500/วันเมื่อเป็นบัญชีเต็ม – ที่เกินจะค้างแล้วส่งต่อวันถัดไป)'],
+      ['THANKS_TEXT', 'ขอบคุณที่ร่วมกิจกรรมตอบคำถามกับ TRB Chemedica หวังว่าของที่ระลึกชิ้นนี้จะเป็นประโยชน์ และหวังว่าจะได้พบท่านอีกในงานครั้งต่อไป', 'ข้อความขอบคุณในอีเมล (ระบบจะเติมชื่อ/เวลารับของ/รหัสบัตรให้เอง)'],
+      ['REDEEM_NOTE', 'รับของที่ระลึกได้ที่บูธ TRB ระหว่างเวลา 12:00–16:00 น. (ทยอยมาได้ตลอดช่วงเวลา ไม่ต้องรีบมารับพร้อมกัน)', 'ข้อความบอกสถานที่/เวลารับของ แสดงหลังส่งคำตอบสำเร็จ'],
+      ['WEBAPP_URL', '', '(ไม่บังคับ) URL ของ Web App ถ้า Deploy ได้ – เว้นว่าง = QR บนบัตรเปิดฟอร์มโดยตรง'],
+      ['FORM_ID', '', '(ระบบกรอกให้อัตโนมัติ)'],
+      ['FORM_URL', '', '(ระบบกรอกให้อัตโนมัติ)']
+    ];
+    s.getRange(1, 1, rows.length, 3).setValues(rows);
+    s.getRange('1:1').setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
+    s.getRange('A2:A').setFontColor('#888888');
+    s.getRange('B2:B').setBackground('#fff8e1');
+    s.setColumnWidth(1, 130); s.setColumnWidth(2, 260); s.setColumnWidth(3, 480);
+    s.setFrozenRows(1);
+  }
+
+  if (!ss.getSheetByName(SH_QUESTIONS)) {
+    var q = ss.insertSheet(SH_QUESTIONS);
+    var qrows = [
+      ['คำถาม', 'ตัวเลือก (คั่นด้วย ; )', 'คำตอบที่ถูก (พิมพ์ให้ตรงกับตัวเลือก)'],
+      ['ตัวอย่างคำถามที่ 1: ... (แก้เป็นคำถามจากเนื้อหาการบรรยาย)', 'ตัวเลือก ก;ตัวเลือก ข;ตัวเลือก ค;ตัวเลือก ง', 'ตัวเลือก ข'],
+      ['ตัวอย่างคำถามที่ 2: ...', 'ใช่;ไม่ใช่', 'ใช่'],
+      ['ตัวอย่างคำถามที่ 3: ...', '10%;25%;50%;75%', '50%']
+    ];
+    q.getRange(1, 1, qrows.length, 3).setValues(qrows);
+    q.getRange('1:1').setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
+    q.setColumnWidth(1, 420); q.setColumnWidth(2, 380); q.setColumnWidth(3, 220);
+    q.setFrozenRows(1);
+  }
+
+  if (!ss.getSheetByName(SH_CODES)) {
+    var c = ss.insertSheet(SH_CODES);
+    c.getRange(1, 1, 1, CODE_HEADERS.length).setValues([CODE_HEADERS])
+      .setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
+    c.setFrozenRows(1);
+    c.setColumnWidth(C.LINK, 420);
+  }
+
+  if (!ss.getSheetByName(SH_LOG)) {
+    var l = ss.insertSheet(SH_LOG);
+    l.getRange(1, 1, 1, 9).setValues([['เวลา', 'รหัสบัตร', 'ชื่อ-นามสกุล', 'เลขใบประกอบวิชาชีพ', 'เบอร์โทร', 'ผล', 'เหตุผล', 'คะแนน', 'Response ID']])
+      .setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
+    l.setFrozenRows(1);
+  }
+
+  if (!ss.getSheetByName(SH_REDEEM)) {
+    var rd = ss.insertSheet(SH_REDEEM);
+    var rrows = [
+      ['จุดแลกของที่ระลึก – พิมพ์รหัสบัตรในช่องสีเหลือง แล้วดูผลด้านล่าง', ''],
+      ['รหัสบัตร', ''],
+      ['', ''],
+      ['สถานะ', "=IFERROR(IF(B2=\"\",\"\",VLOOKUP(UPPER(TRIM(B2)),'" + SH_CODES + "'!A:I,2,FALSE)),\"ไม่พบรหัสนี้\")"],
+      ['ชื่อ-นามสกุล', "=IFERROR(IF(B2=\"\",\"\",VLOOKUP(UPPER(TRIM(B2)),'" + SH_CODES + "'!A:I,3,FALSE)),\"\")"],
+      ['เลขใบประกอบวิชาชีพ', "=IFERROR(IF(B2=\"\",\"\",VLOOKUP(UPPER(TRIM(B2)),'" + SH_CODES + "'!A:I,4,FALSE)),\"\")"],
+      ['คะแนน', "=IFERROR(IF(B2=\"\",\"\",VLOOKUP(UPPER(TRIM(B2)),'" + SH_CODES + "'!A:I,7,FALSE)),\"\")"],
+      ['เวลาตอบผ่าน', "=IFERROR(IF(OR(B2=\"\",VLOOKUP(UPPER(TRIM(B2)),'" + SH_CODES + "'!A:I,8,FALSE)=\"\"),\"\",TEXT(VLOOKUP(UPPER(TRIM(B2)),'" + SH_CODES + "'!A:I,8,FALSE),\"dd/mm/yyyy hh:mm\")),\"\")"],
+      ['เวลารับของ', "=IFERROR(IF(OR(B2=\"\",VLOOKUP(UPPER(TRIM(B2)),'" + SH_CODES + "'!A:I,9,FALSE)=\"\"),\"\",TEXT(VLOOKUP(UPPER(TRIM(B2)),'" + SH_CODES + "'!A:I,9,FALSE),\"dd/mm/yyyy hh:mm\")),\"\")"],
+      ['เหตุผลล่าสุด (ถ้าไม่ผ่าน)', "=IFERROR(IF(B2=\"\",\"\",INDEX(FILTER('" + SH_LOG + "'!G:G,'" + SH_LOG + "'!B:B=UPPER(TRIM(B2))),COUNTIF('" + SH_LOG + "'!B:B,UPPER(TRIM(B2))))),\"\")"],
+      ['', ''],
+      ['✅ ติ๊กเพื่อยืนยันมอบของ', false],
+      ['ผลการบันทึก', ''],
+      ['', ''],
+      ['วิธีใช้', '1) ดูรหัสใต้ QR บนบัตร → พิมพ์ในช่อง B2   2) สถานะต้องเป็น "ตอบผ่าน" (พื้นเขียว)   3) ติ๊กช่อง B12 → ระบบเปลี่ยนเป็น "รับแล้ว" และบันทึกเวลา   4) เก็บบัตรไว้']
+    ];
+    rd.getRange(1, 1, rrows.length, 2).setValues(rrows);
+    rd.getRange('A1').setFontWeight('bold').setFontColor('#1f4e79');
+    rd.getRange('A2:A13').setFontWeight('bold');
+    rd.getRange('B2').setBackground('#fff8e1').setFontSize(20).setFontWeight('bold').setNumberFormat('@');
+    rd.getRange('B4').setFontSize(18).setFontWeight('bold');
+    rd.getRange('B12').insertCheckboxes();
+    rd.setColumnWidth(1, 240); rd.setColumnWidth(2, 460);
+    rd.setRowHeight(2, 40);
+    var rules = rd.getConditionalFormatRules();
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(ST_PASSED).setBackground('#c6efce').setFontColor('#1b8a4a').setRanges([rd.getRange('B4')]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(ST_REDEEMED).setBackground('#ffc7ce').setFontColor('#c0392b').setRanges([rd.getRange('B4')]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(ST_EMPTY).setBackground('#dde3ea').setRanges([rd.getRange('B4')]).build());
+    rd.setConditionalFormatRules(rules);
+  }
+
+  ensureScanSheet_(ss);
+
+  if (!ss.getSheetByName(SH_SUMMARY)) {
+    var m = ss.insertSheet(SH_SUMMARY);
+    var mrows = [
+      ['รายการ', 'จำนวน'],
+      ['ของที่ระลึกทั้งหมด', "=VLOOKUP(\"PRIZE_LIMIT\",'" + SH_SETTINGS + "'!A:B,2,FALSE)"],
+      ['บัตรที่สร้าง', "=COUNTA('" + SH_CODES + "'!A2:A)"],
+      ['ตอบผ่าน (รอรับของ)', "=COUNTIF('" + SH_CODES + "'!B:B,\"" + ST_PASSED + "\")"],
+      ['รับของแล้ว', "=COUNTIF('" + SH_CODES + "'!B:B,\"" + ST_REDEEMED + "\")"],
+      ['ได้สิทธิ์รวม', '=B4+B5'],
+      ['ของคงเหลือ (ยังไม่มีผู้ได้สิทธิ์)', '=B2-B6'],
+      ['ส่งคำตอบทั้งหมด (รวมไม่ผ่าน)', "=COUNTA('" + SH_LOG + "'!A2:A)"],
+      ['ส่งแล้วไม่ผ่าน', "=COUNTIF('" + SH_LOG + "'!F:F,\"ไม่ผ่าน\")"]
+    ];
+    m.getRange(1, 1, mrows.length, 2).setValues(mrows);
+    m.getRange('1:1').setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
+    m.setColumnWidth(1, 280); m.setColumnWidth(2, 120);
+    m.getRange('B2:B9').setFontSize(14).setFontWeight('bold');
+  }
+
+  ui.alert('สร้างชีตเรียบร้อย\n\nขั้นต่อไป: แก้ค่าในชีต "ตั้งค่า" และ "คำถาม" แล้วเลือกเมนู 2) สร้าง Google Form');
+}
+
+// ---------- อ่านค่าตั้งค่า ----------
+function getSettings_() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_SETTINGS);
+  if (!sh) throw new Error('ไม่พบชีต "ตั้งค่า" – เลือกเมนู 1) ก่อน');
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues();
+  var s = {};
+  vals.forEach(function (r) { if (r[0]) s[String(r[0]).trim()] = r[1]; });
+  s.PRIZE_LIMIT = Number(s.PRIZE_LIMIT) || 0;
+  s.CODE_COUNT = Number(s.CODE_COUNT) || 0;
+  s.SEND_EMAIL = String(s.SEND_EMAIL).toUpperCase() === 'TRUE';
+  s.ASK_LICENSE = String(s.ASK_LICENSE).toUpperCase() !== 'FALSE';
+  s.START_TIME = toDate_(s.START_TIME);
+  s.END_TIME = toDate_(s.END_TIME);
+  s.SECRET_WORD = String(s.SECRET_WORD || '').trim();
+  s.STAFF_PIN = String(s.STAFF_PIN || '').trim();
+  s.EVENT_NAME = String(s.EVENT_NAME || 'Symposium');
+  s.CODE_PREFIX = String(s.CODE_PREFIX || '').trim().toUpperCase();
+  s.WEBAPP_URL = String(s.WEBAPP_URL || '').trim();
+  s.REDEEM_NOTE = String(s.REDEEM_NOTE || '').trim();
+  s.THANKS_EMAIL = String(s.THANKS_EMAIL).toUpperCase() === 'TRUE';
+  s.THANKS_TEXT = String(s.THANKS_TEXT || '').trim();
+  return s;
+}
+
+function setSetting_(key, value) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_SETTINGS);
+  var keys = sh.getRange(1, 1, sh.getLastRow(), 1).getValues();
+  for (var i = 0; i < keys.length; i++) {
+    if (keys[i][0] === key) { sh.getRange(i + 1, 2).setValue(value); return; }
+  }
+  sh.appendRow([key, value, '']);
+}
+
+function toDate_(v) {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  // รองรับ "dd/mm/yyyy hh:mm" (ปี ค.ศ. หรือ พ.ศ.)
+  var m = String(v).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+  if (m) {
+    var y = Number(m[3]); if (y > 2400) y -= 543;
+    return new Date(y, Number(m[2]) - 1, Number(m[1]), Number(m[4] || 0), Number(m[5] || 0));
+  }
+  var d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function getQuestions_() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_QUESTIONS);
+  if (!sh || sh.getLastRow() < 2) return [];
+  // ใช้ค่าที่แสดงบนชีต เพื่อให้ 50%, 1,000, วันที่ ตรงกับที่พิมพ์ไว้
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 3).getDisplayValues()
+    .filter(function (r) { return String(r[0]).trim() !== ''; })
+    .map(function (r) {
+      return {
+        title: String(r[0]).trim(),
+        choices: String(r[1]).split(';').map(function (x) { return x.trim(); }).filter(String),
+        answer: String(r[2]).trim()
+      };
+    });
+}
+
+// ---------- 2) สร้างฟอร์ม ----------
+function createForm() {
+  var ui = SpreadsheetApp.getUi();
+  var s = getSettings_();
+  var props = PropertiesService.getScriptProperties();
+
+  if (s.FORM_ID) {
+    var ok = ui.alert('มีฟอร์มอยู่แล้ว', 'ต้องการสร้างฟอร์มใหม่แทนหรือไม่?\n(ฟอร์มเดิมจะถูกยกเลิกการเชื่อมต่อ ลิงก์บัตรต้องอัปเดตใหม่)', ui.ButtonSet.YES_NO);
+    if (ok !== ui.Button.YES) return;
+    try { FormApp.openById(s.FORM_ID).setAcceptingResponses(false); } catch (err) {}
+  }
+
+  var qs = getQuestions_();
+  qs.forEach(function (q, i) {
+    if (q.choices.length < 2) throw new Error('คำถามข้อ ' + (i + 1) + ' มีตัวเลือกน้อยกว่า 2 ตัว');
+    if (q.choices.indexOf(q.answer) < 0) throw new Error('คำถามข้อ ' + (i + 1) + ': คำตอบที่ถูก "' + q.answer + '" ไม่ตรงกับตัวเลือกใด');
+  });
+
+  var form = FormApp.create(s.EVENT_NAME + ' – ตอบคำถามรับของที่ระลึก');
+  form.setTitle(s.EVENT_NAME + ' – ตอบคำถามรับของที่ระลึก')
+    .setDescription('ตอบคำถามให้ครบ แล้วนำ "บัตร QR" มาแลกของที่ระลึกที่จุดบริการ\nสิทธิ์ 1 ท่าน / 1 ชิ้น สำหรับผู้เข้าร่วมประชุมเท่านั้น')
+    .setAllowResponseEdits(false)
+    .setShowLinkToRespondAgain(false)
+    .setProgressBar(false)
+    .setConfirmationMessage(confirmMsg_(s));
+
+  var ids = {};
+  var codeItem = form.addTextItem().setTitle('รหัสบัตร').setHelpText('ระบบกรอกให้อัตโนมัติจาก QR – กรุณาอย่าแก้ไข').setRequired(true);
+  ids.code = codeItem.getId();
+  ids.name = form.addTextItem().setTitle('ชื่อ-นามสกุล').setRequired(true).getId();
+  if (s.ASK_LICENSE) {
+    ids.license = form.addTextItem().setTitle('เลขใบประกอบวิชาชีพ').setHelpText('ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น').setRequired(true).getId();
+  }
+  var phoneItem = form.addTextItem().setTitle('เบอร์โทรศัพท์มือถือ').setRequired(true);
+  phoneItem.setValidation(FormApp.createTextValidation().requireTextMatchesPattern('^0[0-9\\- ]{8,11}$')
+    .setHelpText('กรุณากรอกเบอร์มือถือ 10 หลัก เช่น 0812345678').build());
+  ids.phone = phoneItem.getId();
+  // อีเมล: ใช้ช่องอีเมลของ Google Form เอง (ผู้ตอบพิมพ์เอง) เพื่อให้ฟอร์ม "ส่งสำเนาคำตอบ" ให้ผู้ตอบได้โดยไม่ติดโควตาอีเมลของบัญชี
+  try {
+    form.setEmailCollectionType(FormApp.EmailCollectionType.RESPONDER_INPUT);
+  } catch (err) {
+    form.setCollectEmail(true);
+  }
+
+  if (s.SECRET_WORD) {
+    ids.secret = form.addTextItem().setTitle('คำลับจากการบรรยาย').setHelpText('ประกาศบนสไลด์ในช่วงท้ายของการบรรยาย').setRequired(true).getId();
+  }
+
+  if (qs.length) form.addSectionHeaderItem().setTitle('คำถามจากการบรรยาย');
+  ids.questions = qs.map(function (q) {
+    var it = form.addMultipleChoiceItem().setTitle(q.title).setRequired(true);
+    it.setChoiceValues(q.choices);
+    return { id: it.getId(), answer: q.answer };
+  });
+
+  ids.consent = form.addCheckboxItem()
+    .setTitle('การยินยอมให้เก็บข้อมูลส่วนบุคคล (PDPA)')
+    .setHelpText('ข้อมูลของท่านจะใช้เพื่อยืนยันสิทธิ์รับของที่ระลึกและบันทึกการเข้าร่วมงานนี้เท่านั้น')
+    .setChoiceValues(['ข้าพเจ้ายินยอมให้เก็บและใช้ข้อมูลตามวัตถุประสงค์ข้างต้น'])
+    .setRequired(true).getId();
+
+  // เก็บคำตอบสำรองลงชีตนี้ด้วย
+  form.setDestination(FormApp.DestinationType.SPREADSHEET, SpreadsheetApp.getActive().getId());
+
+  // ลิงก์ pre-filled ต้นแบบ
+  var tmpl = form.createResponse()
+    .withItemResponse(codeItem.createResponse('CODEPLACEHOLDER'))
+    .toPrefilledUrl();
+
+  props.setProperty('ITEM_IDS', JSON.stringify(ids));
+  props.setProperty('PREFILL_TEMPLATE', tmpl);
+
+  // ติดตั้ง trigger ใหม่
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var h = t.getHandlerFunction();
+    if (h === 'onFormSubmit' || h === 'sweepMissed') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('onFormSubmit').forForm(form).onFormSubmit().create();
+  ScriptApp.newTrigger('sweepMissed').timeBased().everyMinutes(5).create();
+
+  setSetting_('FORM_ID', form.getId());
+  setSetting_('FORM_URL', form.getPublishedUrl());
+
+  ui.alert('สร้างฟอร์มเรียบร้อย ✅\n\nแก้หน้าตาฟอร์ม (ธีม/รูป) ได้ที่:\n' + form.getEditUrl() +
+    '\n\n📧 ให้ผู้ตอบได้รับอีเมลยืนยันอัตโนมัติ: เปิดฟอร์ม → Settings → Responses → "Send responders a copy of their response" = Always' +
+    '\n\n⚠️ ห้ามลบหรือเพิ่มคำถามในฟอร์มโดยตรง – ให้แก้ในชีต แล้วสร้างฟอร์มใหม่\n\nขั้นต่อไป: เมนู 3) สร้างรหัสบัตร');
+}
+
+// ---------- 3) สร้างรหัส ----------
+function generateCodes() {
+  var ui = SpreadsheetApp.getUi();
+  var s = getSettings_();
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+  var existing = Math.max(0, sh.getLastRow() - 1);
+
+  var toAdd = s.CODE_COUNT - existing;
+  if (toAdd <= 0) { ui.alert('มีรหัสอยู่แล้ว ' + existing + ' รหัส (CODE_COUNT = ' + s.CODE_COUNT + ')\nถ้าต้องการเพิ่ม ให้เพิ่มค่า CODE_COUNT แล้วสั่งอีกครั้ง'); return; }
+
+  var used = {};
+  if (existing) sh.getRange(2, 1, existing, 1).getValues().forEach(function (r) { used[r[0]] = true; });
+
+  var width = String(s.CODE_COUNT).length < 3 ? 3 : String(s.CODE_COUNT).length;
+  var rows = [];
+  for (var i = existing + 1; i <= s.CODE_COUNT; i++) {
+    var code;
+    do { code = s.CODE_PREFIX + pad_(i, width) + '-' + randomChars_(4); } while (used[code]);
+    used[code] = true;
+    rows.push([code, ST_EMPTY, '', '', '', '', '', '', '', '', '', '']);
+  }
+  ensureCodeCols_(sh);
+  sh.getRange(existing + 2, 1, rows.length, CODE_HEADERS.length).setValues(rows);
+  sh.getRange(2, C.PHONE, s.CODE_COUNT, 1).setNumberFormat('@');
+  sh.getRange(2, C.LICENSE, s.CODE_COUNT, 1).setNumberFormat('@');
+  sh.getRange(2, C.SCORE, s.CODE_COUNT, 1).setNumberFormat('@');
+  updateCardLinks(true);
+  ui.alert('สร้างรหัสเพิ่ม ' + rows.length + ' รหัส (รวม ' + s.CODE_COUNT + ')\n\nขั้นต่อไป: เมนู 4) สร้างลิงก์บัตร แล้วพิมพ์บัตร');
+}
+
+function pad_(n, w) { var s = String(n); while (s.length < w) s = '0' + s; return s; }
+function randomChars_(n) {
+  var out = '';
+  for (var i = 0; i < n; i++) out += CODE_ALPHABET.charAt(Math.floor(Math.random() * CODE_ALPHABET.length));
+  return out;
+}
+
+// ---------- 4) ลิงก์บัตร ----------
+function updateCardLinks(silent) {
+  var s = getSettings_();
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+  var n = sh.getLastRow() - 1;
+  if (n < 1) return;
+  var codes = sh.getRange(2, 1, n, 1).getValues();
+  var links, mode;
+  if (s.WEBAPP_URL) {
+    var base = s.WEBAPP_URL.split('?')[0];
+    // หมายเหตุ: ห้ามใช้ชื่อพารามิเตอร์ "c" – Google บล็อกทำให้เว็บแอปขึ้น "unable to open the file" (HTTP 400)
+    links = codes.map(function (r) { return [base + '?code=' + encodeURIComponent(r[0])]; });
+    mode = 'Web App (หน้าสถานะ)';
+  } else {
+    var tmpl = PropertiesService.getScriptProperties().getProperty('PREFILL_TEMPLATE') || '';
+    if (!tmpl) {
+      if (silent !== true) SpreadsheetApp.getUi().alert('ยังไม่มีฟอร์ม – เลือกเมนู 2) สร้าง Google Form ก่อน');
+      return;
+    }
+    links = codes.map(function (r) { return [tmpl.replace('CODEPLACEHOLDER', encodeURIComponent(r[0]))]; });
+    mode = 'Google Form (กรอกรหัสบัตรให้อัตโนมัติ)';
+  }
+  sh.getRange(2, C.LINK, n, 1).setValues(links);
+  if (silent !== true) SpreadsheetApp.getUi().alert('สร้างลิงก์บัตร ' + n + ' ใบ เรียบร้อย\nรูปแบบลิงก์: ' + mode + '\n\nคัดลอกคอลัมน์ J (ลิงก์บัตร) ทั้งหมด ไปวางในไฟล์ "พิมพ์บัตร QR.html" เพื่อพิมพ์บัตร');
+}
+
+// ---------- เปิด/ปิด ----------
+function openForm() { FormApp.openById(getSettings_().FORM_ID).setAcceptingResponses(true); SpreadsheetApp.getUi().alert('เปิดรับคำตอบแล้ว'); }
+function closeForm() { FormApp.openById(getSettings_().FORM_ID).setAcceptingResponses(false); SpreadsheetApp.getUi().alert('ปิดรับคำตอบแล้ว'); }
+
+function showSummary() {
+  var st = countStatus_();
+  var s = getSettings_();
+  SpreadsheetApp.getUi().alert('สรุปยอด – ' + s.EVENT_NAME +
+    '\n\nของที่ระลึกทั้งหมด: ' + s.PRIZE_LIMIT +
+    '\nตอบผ่าน (รอรับของ): ' + st.passed +
+    '\nรับของแล้ว: ' + st.redeemed +
+    '\nของคงเหลือ: ' + Math.max(0, s.PRIZE_LIMIT - st.passed - st.redeemed) +
+    '\n\nโควตาอีเมลคงเหลือวันนี้: ' + MailApp.getRemainingDailyQuota());
+}
+
+function countStatus_() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+  var n = sh.getLastRow() - 1;
+  var out = { passed: 0, redeemed: 0 };
+  if (n < 1) return out;
+  sh.getRange(2, C.STATUS, n, 1).getValues().forEach(function (r) {
+    if (r[0] === ST_PASSED) out.passed++;
+    else if (r[0] === ST_REDEEMED) out.redeemed++;
+  });
+  return out;
+}
+
+// ---------- ตรวจคำตอบ (trigger) ----------
+function normCode_(v) { return String(v || '').toUpperCase().replace(/\s+/g, '').trim(); }
+function normId_(v) { return String(v || '').toUpperCase().replace(/[\s\-\.]/g, ''); }
+function normPhone_(v) { var d = String(v || '').replace(/\D/g, ''); if (d.indexOf('66') === 0 && d.length === 11) d = '0' + d.slice(2); return d; }
+function normWord_(v) { return String(v || '').toLowerCase().replace(/\s+/g, ''); }
+
+function onFormSubmit(e) {
+  var lock = LockService.getScriptLock();
+  // ถ้ามีคนส่งพร้อมกันมาก ๆ จะรอคิว; ถ้ารอไม่ไหว ตัวเก็บตก (sweepMissed) จะมาตรวจให้ภายหลัง
+  if (!lock.tryLock(240000)) return;
+  try {
+    if (isLogged_(e.response.getId())) return;
+    processResponse_(e.response);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** ตรวจคำตอบที่ตกหล่น (รันอัตโนมัติทุก 5 นาที และสั่งจากเมนูได้) */
+function sweepMissed() {
+  var s = getSettings_();
+  if (!s.FORM_ID) return 0;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(60000)) return 0;
+  var count = 0;
+  try {
+    var logged = loggedIds_();
+    FormApp.openById(s.FORM_ID).getResponses().forEach(function (r) {
+      if (!logged[r.getId()]) { processResponse_(r); count++; }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  return count;
+}
+function sweepMissedMenu() {
+  var n = sweepMissed();
+  SpreadsheetApp.getUi().alert('ตรวจคำตอบที่ตกหล่นแล้ว: ' + n + ' รายการ');
+}
+function loggedIds_() {
+  var log = SpreadsheetApp.getActive().getSheetByName(SH_LOG);
+  var o = {};
+  if (log.getLastRow() < 2) return o;
+  log.getRange(2, 9, log.getLastRow() - 1, 1).getValues().forEach(function (r) { if (r[0]) o[r[0]] = true; });
+  return o;
+}
+function isLogged_(id) { return !!loggedIds_()[id]; }
+
+function processResponse_(resp) {
+  var s = getSettings_();
+  var ids = JSON.parse(PropertiesService.getScriptProperties().getProperty('ITEM_IDS') || '{}');
+  var ans = {};
+  resp.getItemResponses().forEach(function (ir) { ans[ir.getItem().getId()] = ir.getResponse(); });
+
+  var d = {
+    code: normCode_(ans[ids.code]),
+    name: String(ans[ids.name] || '').trim(),
+    license: ids.license ? normId_(ans[ids.license]) : '',
+    phone: normPhone_(ans[ids.phone]),
+    email: String((typeof resp.getRespondentEmail === 'function' && resp.getRespondentEmail()) || ans[ids.email] || '').trim(),
+    secret: ids.secret ? ans[ids.secret] : '',
+    time: resp.getTimestamp()
+  };
+
+  var score = 0;
+  (ids.questions || []).forEach(function (q) { if (String(ans[q.id] || '').trim() === q.answer) score++; });
+  var total = (ids.questions || []).length;
+  var minScore = (s.MIN_SCORE === '' || s.MIN_SCORE === null || s.MIN_SCORE === undefined) ? total : Number(s.MIN_SCORE);
+  d.score = score + '/' + total;
+
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+  var n = Math.max(0, sh.getLastRow() - 1);
+  var data = n ? sh.getRange(2, 1, n, CODE_HEADERS.length).getValues() : [];
+
+  var reason = '';
+  var rowIdx = -1;
+  for (var i = 0; i < data.length; i++) if (data[i][C.CODE - 1] === d.code) { rowIdx = i; break; }
+
+  if (s.START_TIME && d.time < s.START_TIME) reason = 'ส่งก่อนเวลาเปิดรับคำตอบ';
+  else if (s.END_TIME && d.time > s.END_TIME) reason = 'ส่งหลังเวลาปิดรับคำตอบ';
+  else if (rowIdx < 0) reason = 'ไม่พบรหัสบัตรนี้ในระบบ';
+  else if (data[rowIdx][C.STATUS - 1] !== ST_EMPTY) reason = 'รหัสบัตรนี้ถูกใช้สิทธิ์ไปแล้ว';
+  else if (s.SECRET_WORD && normWord_(d.secret) !== normWord_(s.SECRET_WORD)) reason = 'คำลับไม่ถูกต้อง';
+  else {
+    for (var j = 0; j < data.length; j++) {
+      var st = data[j][C.STATUS - 1];
+      if (st !== ST_PASSED && st !== ST_REDEEMED) continue;
+      if (d.license && normId_(data[j][C.LICENSE - 1]) === d.license) { reason = 'เลขใบประกอบวิชาชีพนี้ได้รับสิทธิ์แล้ว (บัตร ' + data[j][0] + ')'; break; }
+      if (d.phone && normPhone_(data[j][C.PHONE - 1]) === d.phone) { reason = 'เบอร์โทรนี้ได้รับสิทธิ์แล้ว (บัตร ' + data[j][0] + ')'; break; }
+    }
+  }
+  if (!reason && score < minScore) reason = 'ตอบถูก ' + score + ' จาก ' + total + ' ข้อ (ต้องถูกอย่างน้อย ' + minScore + ' ข้อ) – ตอบใหม่ได้';
+  if (!reason) {
+    var cnt = countStatus_();
+    if (cnt.passed + cnt.redeemed >= s.PRIZE_LIMIT) reason = 'ของที่ระลึกหมดแล้ว';
+  }
+
+  var log = SpreadsheetApp.getActive().getSheetByName(SH_LOG);
+  if (!reason) {
+    var r = rowIdx + 2;
+    sh.getRange(r, C.SCORE).setNumberFormat('@');
+    sh.getRange(r, C.STATUS, 1, 7).setValues([[ST_PASSED, d.name, d.license, d.phone, d.email, d.score, d.time]]);
+    log.appendRow([d.time, d.code, d.name, d.license, "'" + d.phone, 'ผ่าน', '', d.score, resp.getId()]);
+    var c2 = countStatus_();
+    if (c2.passed + c2.redeemed >= s.PRIZE_LIMIT) {
+      try { FormApp.openById(s.FORM_ID).setAcceptingResponses(false)
+        .setCustomClosedFormMessage('ขออภัย ของที่ระลึกหมดแล้ว ขอบคุณที่ร่วมงาน'); } catch (err) {}
+    }
+  } else {
+    log.appendRow([d.time, d.code, d.name, d.license, "'" + d.phone, 'ไม่ผ่าน', reason, d.score, resp.getId()]);
+  }
+  SpreadsheetApp.flush();
+
+  if (s.SEND_EMAIL && d.email) sendResultEmail_(s, d, reason);
+}
+
+function sendResultEmail_(s, d, reason) {
+  try {
+    if (MailApp.getRemainingDailyQuota() < 1) return;
+    var statusUrl = s.WEBAPP_URL ? s.WEBAPP_URL.split('?')[0] + '?code=' + encodeURIComponent(d.code) : '';
+    var subject, body;
+    if (!reason) {
+      subject = '✅ ' + s.EVENT_NAME + ' – ยืนยันสิทธิ์รับของที่ระลึก (บัตร ' + d.code + ')';
+      body = 'เรียน คุณ' + d.name + '\n\nท่านตอบคำถามผ่านเรียบร้อย กรุณานำ "บัตร QR หมายเลข ' + d.code +
+        '" มาแลกของที่ระลึกที่จุดบริการภายในงาน\n' + (statusUrl ? '\nดูสถานะสิทธิ์: ' + statusUrl + '\n' : '') +
+        '\nหมายเหตุ: ต้องแสดงบัตรตัวจริง สิทธิ์ 1 ท่าน / 1 ชิ้น\n\nขอบคุณที่ร่วมงาน\n' + s.EVENT_NAME;
+    } else {
+      subject = s.EVENT_NAME + ' – ผลการตอบคำถาม (บัตร ' + d.code + ')';
+      body = 'เรียน คุณ' + d.name + '\n\nยังไม่สามารถยืนยันสิทธิ์ได้ เนื่องจาก: ' + reason +
+        (statusUrl ? '\n\nตอบใหม่/ดูสถานะ: ' + statusUrl : '') + '\n\n' + s.EVENT_NAME;
+    }
+    MailApp.sendEmail({ to: d.email, subject: subject, body: body, name: s.EVENT_NAME });
+  } catch (err) { console.error(err); }
+}
+
+// ---------- Web App: หน้าสถานะ + มอบของ ----------
+function doGet(e) {
+  var P = (e && e.parameter) || {};
+  if (P.action) return apiJson_(P);
+  if (P.page === 'scan') {
+    var ts = HtmlService.createTemplateFromFile('Scanner');
+    ts.eventName = getSettings_().EVENT_NAME;
+    return ts.evaluate().setTitle('สแกนบัตร – ' + ts.eventName)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+  }
+  var code = normCode_(P.code || P.k);
+  var t = HtmlService.createTemplateFromFile('Status');
+  t.initial = JSON.stringify(code ? lookup(code) : { state: 'input', event: getSettings_().EVENT_NAME }).replace(/</g, '\\u003c');
+  return t.evaluate()
+    .setTitle('สถานะสิทธิ์รับของที่ระลึก')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/** JSON API สำหรับแอปสแกนด้วยกล้องมือถือ: ?action=ping|lookup|redeem&code=...&pin=...&lane=... */
+/** เรียกจากหน้า Scanner (google.script.run) */
+function scanApi(P) { return apiCore_(P || {}); }
+
+function apiJson_(P) {
+  var out = apiCore_(P);
+  var js = JSON.stringify(out);
+  if (P.callback && /^[A-Za-z_$][\w$]*$/.test(P.callback)) {
+    return ContentService.createTextOutput(P.callback + '(' + js + ');').setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(js).setMimeType(ContentService.MimeType.JSON);
+}
+
+function apiCore_(P) {
+  var out;
+  try {
+    var s = getSettings_();
+    var pinOk = !!s.STAFF_PIN && String(P.pin || '').trim() === s.STAFF_PIN;
+    if (!pinOk) {
+      out = { ok: false, error: 'PIN ไม่ถูกต้อง' };
+    } else if (P.action === 'ping') {
+      var cnt = countStatus_();
+      out = { ok: true, event: s.EVENT_NAME, passed: cnt.passed, redeemed: cnt.redeemed, limit: s.PRIZE_LIMIT };
+    } else {
+      var code = extractCode_(P.code || '');
+      if (!code) out = { ok: false, error: 'ไม่พบรหัสบัตรใน QR' };
+      else if (P.action === 'lookup') out = { ok: true, data: lookup(code) };
+      else if (P.action === 'redeem') {
+        var force = String(P.force || '') === '1';
+        var r = redeemByCode_(code, { force: force, lane: String(P.lane || ''), note: String(P.note || ''), name: String(P.name || '') });
+        var d = lookup(code);
+        var state = r.ok ? (r.forced ? 'forced_now' : 'redeemed_now') : (d.state === 'redeemed' ? 'already' : (d.state === 'notfound' ? 'notfound' : 'notpassed'));
+        var csh = SpreadsheetApp.getActive().getSheetByName(SH_CODES), row = findCodeRow_(csh, code);
+        var fullName = row ? String(csh.getRange(row, C.NAME).getValue() || '') : '';
+        out = { ok: r.ok, state: state, msg: r.msg, code: code, name: fullName, score: d.score || '', at: d.at || '', lane: String(P.lane || ''), canForce: state === 'notpassed' };
+      } else out = { ok: false, error: 'action ไม่ถูกต้อง' };
+    }
+  } catch (err) {
+    out = { ok: false, error: String(err && err.message || err) };
+  }
+  return out;
+}
+
+/** เรียกจากหน้าเว็บ: ดูสถานะของรหัส */
+function lookup(code) {
+  code = normCode_(code);
+  var s = getSettings_();
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+  var n = Math.max(0, sh.getLastRow() - 1);
+  var codes = n ? sh.getRange(2, 1, n, 1).getValues() : [];
+  var idx = -1;
+  for (var i = 0; i < codes.length; i++) if (codes[i][0] === code) { idx = i; break; }
+  var base = { event: s.EVENT_NAME, code: code };
+  if (idx < 0) return merge_(base, { state: 'notfound' });
+
+  var row = sh.getRange(idx + 2, 1, 1, CODE_HEADERS.length).getValues()[0];
+  var status = row[C.STATUS - 1];
+  if (status === ST_REDEEMED) return merge_(base, { state: 'redeemed', name: maskName_(row[C.NAME - 1]), at: fmt_(row[C.REDEEMED_AT - 1]) });
+  if (status === ST_PASSED) return merge_(base, { state: 'passed', name: maskName_(row[C.NAME - 1]), score: row[C.SCORE - 1], at: fmt_(row[C.ANSWERED_AT - 1]) });
+
+  // ยังไม่ได้สิทธิ์
+  var now = new Date();
+  var cnt = countStatus_();
+  if (cnt.passed + cnt.redeemed >= s.PRIZE_LIMIT) return merge_(base, { state: 'soldout' });
+  if (s.START_TIME && now < s.START_TIME) return merge_(base, { state: 'notyet', opensAt: fmt_(s.START_TIME) });
+  if (s.END_TIME && now > s.END_TIME) return merge_(base, { state: 'closed' });
+
+  var tmpl = PropertiesService.getScriptProperties().getProperty('PREFILL_TEMPLATE') || '';
+  var formUrl = tmpl.replace('CODEPLACEHOLDER', encodeURIComponent(code));
+  var lastFail = lastFailure_(code);
+  return merge_(base, { state: 'open', formUrl: formUrl, lastFail: lastFail });
+}
+
+/** เรียกจากหน้าเว็บ: เจ้าหน้าที่ยืนยันการมอบของ */
+function redeem(code, pin) {
+  code = normCode_(code);
+  var cache = CacheService.getScriptCache();
+  var fails = Number(cache.get('pinfail') || 0);
+  if (fails >= 10) return { ok: false, msg: 'ใส่ PIN ผิดหลายครั้ง ระบบล็อก 10 นาที' };
+
+  var s = getSettings_();
+  if (!s.STAFF_PIN || String(pin).trim() !== s.STAFF_PIN) {
+    cache.put('pinfail', String(fails + 1), 600);
+    return { ok: false, msg: 'PIN ไม่ถูกต้อง' };
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+    var n = Math.max(0, sh.getLastRow() - 1);
+    var codes = n ? sh.getRange(2, 1, n, 1).getValues() : [];
+    for (var i = 0; i < codes.length; i++) {
+      if (codes[i][0] !== code) continue;
+      var r = i + 2;
+      var st = sh.getRange(r, C.STATUS).getValue();
+      if (st === ST_REDEEMED) return { ok: false, msg: 'บัตรนี้รับของไปแล้ว', data: lookup(code) };
+      if (st !== ST_PASSED) return { ok: false, msg: 'บัตรนี้ยังไม่ได้ตอบผ่าน', data: lookup(code) };
+      sh.getRange(r, C.STATUS).setValue(ST_REDEEMED);
+      sh.getRange(r, C.REDEEMED_AT).setValue(new Date());
+      queueThanks_(sh, r);
+      SpreadsheetApp.flush();
+      return { ok: true, msg: 'บันทึกการมอบของเรียบร้อย', data: lookup(code) };
+    }
+    return { ok: false, msg: 'ไม่พบรหัสบัตร' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function lastFailure_(code) {
+  var log = SpreadsheetApp.getActive().getSheetByName(SH_LOG);
+  var n = log.getLastRow() - 1;
+  if (n < 1) return '';
+  var start = Math.max(2, log.getLastRow() - 500);
+  var rows = log.getRange(start, 1, log.getLastRow() - start + 1, 7).getValues();
+  for (var i = rows.length - 1; i >= 0; i--) {
+    if (rows[i][1] === code) return rows[i][5] === 'ไม่ผ่าน' ? rows[i][6] : '';
+  }
+  return '';
+}
+
+function maskName_(name) {
+  name = String(name || '').trim();
+  var parts = name.split(/\s+/);
+  if (parts.length < 2) return name;
+  var last = parts[parts.length - 1];
+  return parts.slice(0, -1).join(' ') + ' ' + last.charAt(0) + '•••';
+}
+function fmt_(d) { return d instanceof Date ? Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm') : String(d || ''); }
+function merge_(a, b) { var o = {}; for (var k in a) o[k] = a[k]; for (var k2 in b) o[k2] = b[k2]; return o; }
+
+// ---------- จุดแลกของ (ชีต "แลกของ" และ "สแกน") ----------
+function onEdit(e) {
+  try {
+    var r = e.range;
+    var sh = r.getSheet();
+    if (sh.getName().indexOf(SH_SCAN) === 0) { handleScan_(sh, r, e); return; }
+    if (sh.getName() !== SH_REDEEM) return;
+    if (r.getA1Notation() === 'B2') { sh.getRange('B12').setValue(false); sh.getRange('B13').setValue(''); return; }
+    if (r.getA1Notation() !== 'B12' || e.value !== 'TRUE') return;
+    var res = redeemByCode_(String(sh.getRange('B2').getValue()));
+    sh.getRange('B13').setValue((res.ok ? '✅ ' : '❌ ') + res.msg);
+    sh.getRange('B12').setValue(false);
+  } catch (err) {
+    try { e.range.getSheet().getRange('B13').setValue('❌ ' + err.message); } catch (e2) {}
+  }
+}
+
+/**
+ * ตัดสิทธิ์บัตร  opt = { force, lane, note, name }
+ *   force = true → "ปล่อยผ่าน": มอบของแม้ยังไม่ได้ตอบผ่าน (บันทึกหมายเหตุ + ลงชีต "บันทึก" ว่าใคร/ช่องไหนปล่อย)
+ */
+function redeemByCode_(code, opt) {
+  opt = opt || {};
+  code = normCode_(code);
+  if (!code) return { ok: false, msg: 'กรุณาพิมพ์รหัสบัตรในช่อง B2' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+    ensureCodeCols_(sh);
+    var n = Math.max(0, sh.getLastRow() - 1);
+    var codes = n ? sh.getRange(2, 1, n, 1).getValues() : [];
+    for (var i = 0; i < codes.length; i++) {
+      if (codes[i][0] !== code) continue;
+      var row = i + 2;
+      var st = sh.getRange(row, C.STATUS).getValue();
+      if (st === ST_REDEEMED) return { ok: false, msg: 'บัตร ' + code + ' รับของไปแล้วเมื่อ ' + fmt_(sh.getRange(row, C.REDEEMED_AT).getValue()) };
+      var forced = false;
+      if (st !== ST_PASSED) {
+        if (!opt.force) return { ok: false, msg: 'บัตร ' + code + ' ยังไม่ได้ตอบผ่าน (สถานะ: ' + st + ')' };
+        forced = true;
+        if (opt.name && !sh.getRange(row, C.NAME).getValue()) sh.getRange(row, C.NAME).setValue(opt.name);
+        var note = 'ปล่อยผ่าน (เดิม: ' + st + ')' + (opt.lane ? ' ช่อง ' + opt.lane : '') + (opt.note ? ' · ' + opt.note : '');
+        sh.getRange(row, C.NOTE).setValue(note).setBackground('#ffe8b3');
+        var log = SpreadsheetApp.getActive().getSheetByName(SH_LOG);
+        if (log) log.appendRow([new Date(), code, sh.getRange(row, C.NAME).getValue(), '', '', 'ปล่อยผ่าน', note, '', '']);
+      } else if (opt.lane) {
+        sh.getRange(row, C.NOTE).setValue('ช่อง ' + opt.lane);
+      }
+      sh.getRange(row, C.STATUS).setValue(ST_REDEEMED);
+      sh.getRange(row, C.REDEEMED_AT).setValue(new Date());
+      queueThanks_(sh, row);
+      SpreadsheetApp.flush();
+      var who = sh.getRange(row, C.NAME).getValue() || '(ไม่มีชื่อ)';
+      return { ok: true, forced: forced, msg: (forced ? 'ปล่อยผ่าน – มอบของให้ ' : 'มอบของให้ ') + who + ' (บัตร ' + code + ') เรียบร้อย ' + fmt_(new Date()) };
+    }
+    return { ok: false, msg: 'ไม่พบรหัสบัตร ' + code };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** เพิ่มหัวคอลัมน์ K/L ในชีต "รหัส" ถ้ายังไม่มี (รองรับชีตที่สร้างด้วยโค้ดเวอร์ชันก่อน) */
+function ensureCodeCols_(sh) {
+  if (!sh) return;
+  if (sh.getMaxColumns() < CODE_HEADERS.length) sh.insertColumnsAfter(sh.getMaxColumns(), CODE_HEADERS.length - sh.getMaxColumns());
+  var head = sh.getRange(1, 1, 1, CODE_HEADERS.length).getValues()[0];
+  var changed = false;
+  for (var i = 0; i < CODE_HEADERS.length; i++) if (!head[i]) { head[i] = CODE_HEADERS[i]; changed = true; }
+  if (changed) sh.getRange(1, 1, 1, CODE_HEADERS.length).setValues([head]).setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
+}
+
+/** เติมคีย์ตั้งค่าที่ขาด (ไม่ทับค่าที่มีอยู่) + คอลัมน์ใหม่ในชีต "รหัส" */
+function ensureSchemaMenu() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(SH_SETTINGS);
+  var have = {};
+  sh.getRange(1, 1, sh.getLastRow(), 1).getValues().forEach(function (r) { if (r[0]) have[String(r[0]).trim()] = true; });
+  var defaults = [
+    ['THANKS_EMAIL', 'FALSE', 'TRUE = ส่งอีเมลขอบคุณ+ยืนยันการรับของ หลังสแกนรับของ (โควตาสคริปต์ 100 ฉบับ/วันช่วงทดลอง Workspace – ที่เกินจะค้างแล้วส่งต่อวันถัดไป)'],
+    ['THANKS_TEXT', 'ขอบคุณที่ร่วมกิจกรรมตอบคำถามกับ TRB Chemedica หวังว่าของที่ระลึกชิ้นนี้จะเป็นประโยชน์ และหวังว่าจะได้พบท่านอีกในงานครั้งต่อไป', 'ข้อความขอบคุณในอีเมล (ระบบจะเติมชื่อ/เวลารับของ/รหัสบัตรให้เอง)'],
+    ['REDEEM_NOTE', 'รับของที่ระลึกได้ที่บูธ TRB ระหว่างเวลา 12:00–16:00 น. (ทยอยมาได้ตลอดช่วงเวลา ไม่ต้องรีบมารับพร้อมกัน)', 'ข้อความบอกสถานที่/เวลารับของ แสดงหลังส่งคำตอบสำเร็จ']
+  ];
+  var added = [];
+  defaults.forEach(function (d) { if (!have[d[0]]) { sh.appendRow(d); added.push(d[0]); } });
+  sh.getRange('B2:B').setBackground('#fff8e1');
+  ensureCodeCols_(ss.getSheetByName(SH_CODES));
+  SpreadsheetApp.getUi().alert(added.length ? 'เพิ่มค่าตั้งค่า: ' + added.join(', ') + '\nตรวจ/แก้ค่าในชีต "ตั้งค่า" ได้เลย' : 'ค่าตั้งค่าและคอลัมน์ครบอยู่แล้ว');
+}
+
+// ---------- อีเมลขอบคุณหลังรับของ (ส่งเป็นคิว ไม่ถ่วงความเร็วจุดสแกน) ----------
+function queueThanks_(sh, row) {
+  try {
+    var s = getSettings_();
+    if (!s.THANKS_EMAIL) return;
+    var email = String(sh.getRange(row, C.EMAIL).getValue() || '').trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
+    var cell = sh.getRange(row, C.THANKS);
+    if (!cell.getValue()) cell.setValue(TH_PENDING);
+  } catch (err) { console.error(err); }
+}
+
+/** ส่งอีเมลขอบคุณที่ค้างอยู่ (เรียกจากเมนู หรือ time trigger ทุก 5 นาที) – ส่งเท่าที่โควตาวันนี้เหลือ */
+function sendPendingThanks() {
+  var s = getSettings_();
+  var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+  ensureCodeCols_(sh);
+  var n = Math.max(0, sh.getLastRow() - 1);
+  if (!n) return { sent: 0, left: 0, quota: MailApp.getRemainingDailyQuota() };
+  var vals = sh.getRange(2, 1, n, CODE_HEADERS.length).getValues();
+  var sent = 0, left = 0;
+  for (var i = 0; i < vals.length; i++) {
+    var r = vals[i];
+    if (r[C.STATUS - 1] !== ST_REDEEMED || r[C.THANKS - 1] !== TH_PENDING) continue;
+    var email = String(r[C.EMAIL - 1] || '').trim();
+    if (!email) { sh.getRange(i + 2, C.THANKS).setValue('ไม่มีอีเมล'); continue; }
+    if (MailApp.getRemainingDailyQuota() < 1) { left++; continue; }
+    try {
+      var name = String(r[C.NAME - 1] || '').trim();
+      var subject = '🎁 ' + s.EVENT_NAME + ' – ขอบคุณที่ร่วมกิจกรรม (ยืนยันการรับของที่ระลึก)';
+      var body = 'เรียน ' + (name ? 'คุณ' + name : 'ท่านผู้เข้าร่วมประชุม') + '\n\n' +
+        (s.THANKS_TEXT ? s.THANKS_TEXT + '\n\n' : '') +
+        'อีเมลนี้เป็นการยืนยันว่าท่านได้รับของที่ระลึกเรียบร้อยแล้ว\n' +
+        '  บัตรหมายเลข: ' + r[C.CODE - 1] + '\n' +
+        '  เวลารับของ: ' + fmt_(r[C.REDEEMED_AT - 1]) + '\n\n' +
+        'ขอบคุณที่ร่วมงาน\n' + s.EVENT_NAME + '\nTRB Chemedica (Thailand) Ltd.';
+      MailApp.sendEmail({ to: email, subject: subject, body: body, name: s.EVENT_NAME });
+      sh.getRange(i + 2, C.THANKS).setValue('ส่งแล้ว ' + fmt_(new Date()));
+      sent++;
+    } catch (err) {
+      sh.getRange(i + 2, C.THANKS).setValue('ผิดพลาด: ' + String(err.message || err).slice(0, 60));
+    }
+  }
+  return { sent: sent, left: left, quota: MailApp.getRemainingDailyQuota() };
+}
+
+function sendPendingThanksMenu() {
+  var r = sendPendingThanks();
+  SpreadsheetApp.getUi().alert('ส่งอีเมลขอบคุณแล้ว ' + r.sent + ' ฉบับ' + (r.left ? '\nค้างอยู่ ' + r.left + ' ฉบับ (โควตาวันนี้หมด – เลือกเมนูนี้อีกครั้งพรุ่งนี้ หรือเปิดส่งอัตโนมัติ)' : '') +
+    '\nโควตาอีเมลคงเหลือวันนี้: ' + r.quota);
+}
+
+function installThanksTrigger() {
+  removeThanksTrigger(true);
+  ScriptApp.newTrigger('sendPendingThanks').timeBased().everyMinutes(5).create();
+  SpreadsheetApp.getUi().alert('เปิดส่งอีเมลขอบคุณอัตโนมัติแล้ว (ทุก 5 นาที ส่งเท่าที่โควตาวันนี้เหลือ ที่เหลือจะส่งต่อวันถัดไปเอง)\nอย่าลืมตั้ง THANKS_EMAIL = TRUE ในชีต "ตั้งค่า"');
+}
+function removeThanksTrigger(silent) {
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'sendPendingThanks') { ScriptApp.deleteTrigger(t); n++; } });
+  if (!silent) SpreadsheetApp.getUi().alert(n ? 'ปิดส่งอีเมลอัตโนมัติแล้ว' : 'ไม่ได้เปิดส่งอัตโนมัติอยู่');
+}
+
+// ---------- แท็บ "สแกน" : ยิง QR บนบัตรด้วยเครื่องสแกนบาร์โค้ด → ตัดสิทธิ์ทันทีในครั้งเดียว ----------
+var SCAN_INPUT = 'A2';      // ช่องรับค่าจากเครื่องสแกน
+var SCAN_RESULT = 'A4';     // ผลใหญ่ (เขียว/แดง/เหลือง)
+var SCAN_DETAIL = 'A5';     // ชื่อ + รายละเอียด
+var SCAN_HIST_HEAD = 8;     // แถวหัวตารางประวัติ
+var SCAN_HIST_MAX = 30;
+
+function createScanSheet() {
+  var ss = SpreadsheetApp.getActive();
+  var made = ensureScanSheet_(ss);
+  ss.setActiveSheet(ss.getSheetByName(SH_SCAN));
+  SpreadsheetApp.getUi().alert(made ? 'สร้างแท็บ "สแกน" เรียบร้อย' : 'มีแท็บ "สแกน" อยู่แล้ว',
+    'วิธีใช้: คลิกช่องสีเหลือง A2 หนึ่งครั้ง แล้วยิง QR บนบัตรด้วยเครื่องสแกนบาร์โค้ด (แบบ 2D ที่ต่อเป็นคีย์บอร์ด)\n' +
+    'ระบบจะตรวจสิทธิ์และตัดสิทธิ์ให้ทันที ไม่ต้องพิมพ์หรือติ๊กอะไรเพิ่ม\n\n' +
+    'สำคัญ: ตั้งคีย์บอร์ดของเครื่องเป็นภาษาอังกฤษ (EN) ก่อนสแกน และให้เครื่องสแกนส่ง Enter ต่อท้าย',
+    SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function createScanSheetsExtra() {
+  var ss = SpreadsheetApp.getActive();
+  ensureScanSheet_(ss);
+  var made = 0;
+  [SH_SCAN + '-2', SH_SCAN + '-3'].forEach(function (n) { if (ensureScanSheet_(ss, n)) made++; });
+  SpreadsheetApp.getUi().alert('แท็บสแกนพร้อมใช้: "สแกน" (ช่อง 1), "สแกน-2" (ช่อง 2), "สแกน-3" (ช่อง 3)\n' +
+    'ให้แต่ละโน้ตบุ๊ก/แท็บเล็ตเปิดแท็บของตัวเอง ผลสแกนจะไม่ทับกัน' + (made ? '' : '\n(มีครบอยู่แล้ว)'));
+}
+
+function ensureScanSheet_(ss, name) {
+  name = name || SH_SCAN;
+  if (ss.getSheetByName(name)) return false;
+  var sc = ss.insertSheet(name);
+  var laneNo = name === SH_SCAN ? '1' : name.replace(SH_SCAN + '-', '');
+  sc.getRange('A1').setValue('จุดแลกของแบบสแกน · ช่องที่ ' + laneNo + ' – คลิกช่องสีเหลืองครั้งเดียว แล้วยิง QR บนบัตร (ตั้งคีย์บอร์ดเป็น EN)')
+    .setFontWeight('bold').setFontColor('#1f4e79');
+  sc.getRange(SCAN_INPUT).setBackground('#fff8e1').setFontSize(14).setNumberFormat('@').setWrap(false);
+  sc.getRange('A3').setValue('พิมพ์รหัส 9 ตัวในช่องเดียวกันแล้วกด Enter ก็ได้ ถ้าสแกนไม่ติด').setFontColor('#5f6b7a').setFontSize(10);
+  sc.getRange(SCAN_RESULT).setValue('พร้อมสแกน').setFontSize(36).setFontWeight('bold').setBackground('#dde3ea')
+    .setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sc.getRange(SCAN_DETAIL).setFontSize(18).setHorizontalAlignment('center');
+  sc.getRange(SCAN_HIST_HEAD, 1, 1, 4).setValues([['เวลา', 'รหัสบัตร', 'ผล', 'ชื่อ']])
+    .setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
+  sc.getRange('A7').setValue('ประวัติการสแกนล่าสุด (เครื่องนี้)').setFontWeight('bold');
+  sc.setColumnWidth(1, 520); sc.setColumnWidth(2, 140); sc.setColumnWidth(3, 260); sc.setColumnWidth(4, 260);
+  sc.setRowHeight(2, 44); sc.setRowHeight(4, 110); sc.setRowHeight(5, 40);
+  sc.getRange(SCAN_HIST_HEAD, 1, SCAN_HIST_MAX + 1, 1).setNumberFormat('dd/mm/yyyy hh:mm:ss');
+  return true;
+}
+
+/** ดึงรหัสบัตรออกจากสิ่งที่สแกนได้ (ลิงก์ฟอร์มที่เติมรหัสไว้ / ลิงก์เว็บแอป / รหัสล้วน) */
+function extractCode_(raw) {
+  raw = String(raw || '').trim();
+  if (!raw) return '';
+  var m = raw.match(/(?:^|[?&])(?:entry\.\d+|code|k)=([^&#\s]+)/i);
+  if (m) { try { raw = decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (err) { raw = m[1]; } }
+  raw = normCode_(raw);
+  var m2 = raw.match(/([A-Z]+\d{3})-?([A-Z0-9]{4})/);
+  return m2 ? m2[1] + '-' + m2[2] : raw;
+}
+
+function handleScan_(sh, r, e) {
+  if (r.getA1Notation() !== SCAN_INPUT) return;
+  var raw = e.value != null ? e.value : r.getValue();
+  if (!raw) return;
+  var force = /!\s*$/.test(String(raw));          // พิมพ์รหัสแล้วต่อท้ายด้วย ! = ปล่อยผ่าน (มอบของแม้ยังไม่ตอบผ่าน)
+  var code = extractCode_(String(raw).replace(/!\s*$/, ''));
+  var lane = String(sh.getName() === SH_SCAN ? '1' : sh.getName().replace(SH_SCAN + '-', ''));
+  var res = redeemByCode_(code, { force: force, lane: 'N' + lane });
+  var name = '', color, text;
+  var codesSh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+  var row = findCodeRow_(codesSh, code);
+  if (row) name = String(codesSh.getRange(row, C.NAME).getValue() || '');
+  if (res.ok && res.forced) { color = '#c6efce'; text = '✅ ปล่อยผ่าน'; }
+  else if (res.ok) { color = '#c6efce'; text = '✅ มอบของได้'; }
+  else if (/รับของไปแล้ว/.test(res.msg)) { color = '#ffc7ce'; text = '❌ รับไปแล้ว'; }
+  else if (/ไม่พบ/.test(res.msg)) { color = '#ffc7ce'; text = '❌ ไม่พบรหัส'; }
+  else { color = '#ffe8b3'; text = '⚠ ยังไม่ผ่าน'; }
+  sh.getRange(SCAN_RESULT).setValue(text + '  ' + code).setBackground(color);
+  sh.getRange(SCAN_DETAIL).setValue((name ? name + ' · ' : '') + res.msg + (text === '⚠ ยังไม่ผ่าน' ? '   (ถ้าต้องปล่อยผ่าน: พิมพ์ ' + code + '! แล้ว Enter)' : ''));
+  // ประวัติ (แถวใหม่บนสุด, เก็บไม่เกิน SCAN_HIST_MAX)
+  sh.insertRowAfter(SCAN_HIST_HEAD);
+  sh.getRange(SCAN_HIST_HEAD + 1, 1, 1, 4).setValues([[new Date(), code, text, name]])
+    .setBackground(color).setFontColor('#1d2733').setFontWeight('normal').setNumberFormat('@');
+  sh.getRange(SCAN_HIST_HEAD + 1, 1).setNumberFormat('dd/mm/yyyy hh:mm:ss');
+  var last = sh.getLastRow();
+  if (last > SCAN_HIST_HEAD + SCAN_HIST_MAX) sh.deleteRows(SCAN_HIST_HEAD + SCAN_HIST_MAX + 1, last - (SCAN_HIST_HEAD + SCAN_HIST_MAX));
+  // เคลียร์ช่องและกลับไปรอสแกนใบต่อไป
+  var inp = sh.getRange(SCAN_INPUT);
+  inp.setValue('');
+  inp.activate();
+}
+
+function findCodeRow_(sh, code) {
+  if (!sh || !code) return 0;
+  var n = Math.max(0, sh.getLastRow() - 1);
+  if (!n) return 0;
+  var codes = sh.getRange(2, 1, n, 1).getValues();
+  for (var i = 0; i < codes.length; i++) if (codes[i][0] === code) return i + 2;
+  return 0;
+}
+
+/** ข้อความหน้ายืนยันหลังส่งคำตอบ – ต่อท้ายด้วย REDEEM_NOTE จากชีต "ตั้งค่า" */
+function confirmMsg_(s) {
+  var msg = 'ส่งคำตอบเรียบร้อย ✅\n\n';
+  if (s.REDEEM_NOTE) msg += s.REDEEM_NOTE + '\n\n';
+  msg += 'กรุณานำ "บัตร QR" ใบนี้มาแสดงที่จุดแลกของ เจ้าหน้าที่จะสแกนบัตรเพื่อตรวจผล\n(หากตอบไม่ผ่าน สแกน QR แล้วตอบใหม่ได้)';
+  return msg;
+}
+
+/** อัปเดตชื่อ/คำอธิบาย/ข้อความยืนยันของฟอร์มตามค่าในชีต "ตั้งค่า" โดยไม่ต้องสร้างฟอร์มใหม่ */
+function refreshFormText() {
+  var s = getSettings_();
+  if (!s.FORM_ID) { SpreadsheetApp.getUi().alert('ยังไม่มีฟอร์ม – เลือกเมนู 2) ก่อน'); return; }
+  FormApp.openById(s.FORM_ID)
+    .setTitle(s.EVENT_NAME + ' – ตอบคำถามรับของที่ระลึก')
+    .setDescription('ตอบคำถามให้ครบ แล้วนำ "บัตร QR" มาแลกของที่ระลึกที่จุดบริการ\nสิทธิ์ 1 ท่าน / 1 ชิ้น สำหรับผู้เข้าร่วมประชุมเท่านั้น')
+    .setConfirmationMessage(confirmMsg_(s));
+  SpreadsheetApp.getUi().alert('อัปเดตข้อความในฟอร์มเรียบร้อย');
+}
