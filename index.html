@@ -49,6 +49,23 @@
   .setup label { font-size:13px; color:var(--muted); display:block; margin-bottom:4px; }
   .setup input, .setup select { width:100%; font:inherit; font-size:18px; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--fg); }
   .err { color:#ff8a8a; font-size:14px; min-height:1.2em; }
+  /* โหมดเครื่องสแกน (HID) */
+  .hid { display:none; flex:1; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; gap:10px; background:radial-gradient(ellipse at center, #1a2d4a 0%, var(--bg) 70%); }
+  body.hidmode .cam { display:none; } body.hidmode .hid { display:flex; }
+  .hid .ic { font-size:72px; line-height:1; }
+  .hid h2 { margin:0; font-size:26px; font-weight:800; }
+  .hid p { margin:0; color:var(--muted); font-size:15px; max-width:420px; line-height:1.4; }
+  .hid .live { font-size:13px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:4px 12px; }
+  .hid .live.on { color:#7ee2a8; border-color:#2e7d55; }
+  #hidIn { position:absolute; opacity:0; width:1px; height:1px; left:-10px; top:-10px; }
+  /* ปุ่มปล่อยผ่านในหน้าผล */
+  .force { margin-top:22px; display:none; flex-direction:column; gap:10px; align-items:center; width:100%; max-width:380px; }
+  .force.show { display:flex; }
+  .force .fbtn { font:inherit; font-weight:800; font-size:17px; border:2px solid #fff; background:rgba(0,0,0,.25); color:#fff; border-radius:12px; padding:12px 18px; width:100%; }
+  .force .fbtn.go { background:#fff; color:#7a4b00; }
+  .force input { width:100%; font:inherit; font-size:17px; padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.6); background:rgba(0,0,0,.25); color:#fff; }
+  .force input::placeholder { color:rgba(255,255,255,.7); }
+  .force .note { font-size:13px; opacity:.9; }
   @media (prefers-reduced-motion: no-preference) { .result.show { animation:pop .18s ease-out; } @keyframes pop { from { opacity:.3; transform:scale(.98);} to { opacity:1; transform:none; } } }
 </style>
 </head>
@@ -56,11 +73,15 @@
 
 <div class="setup show" id="setup">
   <h1>สแกนบัตรรับของที่ระลึก</h1>
-  <p>สำหรับเจ้าหน้าที่จุดแลกของ · ใส่ PIN แล้วกดเริ่ม กล้องจะเปิดค้างไว้ ยกบัตรเข้าหน้ากล้องทีละใบ</p>
+  <p>สำหรับเจ้าหน้าที่จุดแลกของ · ใส่ PIN เลือกวิธีอ่านบัตร แล้วกดเริ่ม — ใช้กล้องมือถือ หรือต่อเครื่องสแกนบาร์โค้ดกับแท็บเล็ต/โน้ตบุ๊กก็ได้</p>
   <div><label for="api">ที่อยู่ระบบ (API URL — ผู้ดูแลตั้งให้แล้ว แก้เฉพาะเมื่อผู้ดูแลแจ้ง)</label><input id="api" type="url" autocomplete="off" spellcheck="false"></div>
   <div><label for="pin">PIN เจ้าหน้าที่</label><input id="pin" type="password" inputmode="numeric" autocomplete="off"></div>
+  <div><label for="mode">วิธีอ่านบัตร</label>
+    <select id="mode" onchange="modeHint()"><option value="cam">กล้องมือถือ/แท็บเล็ต</option><option value="hid">เครื่องสแกนบาร์โค้ด (DS2208/DS2278 ต่อ USB หรือ Bluetooth กับเครื่องนี้)</option></select></div>
   <div><label for="lane">ช่องแลกของ (เครื่องนี้)</label>
-    <select id="lane"><option value="M1">มือถือ 1</option><option value="M2">มือถือ 2</option><option value="M3">มือถือ 3</option><option value="M4">มือถือ 4</option></select></div>
+    <select id="lane"><option value="M1">มือถือ 1</option><option value="M2">มือถือ 2</option><option value="M3">มือถือ 3</option><option value="M4">มือถือ 4</option>
+      <option value="T1">เครื่องสแกน+แท็บเล็ต 1</option><option value="T2">เครื่องสแกน+แท็บเล็ต 2</option><option value="T3">เครื่องสแกน+แท็บเล็ต 3</option></select></div>
+  <p id="modeHint" style="display:none">โหมดเครื่องสแกน: จับคู่เครื่องสแกนกับแท็บเล็ต/โน้ตบุ๊กเครื่องนี้ก่อน ตั้งคีย์บอร์ดระบบเป็นภาษาอังกฤษ (EN) · หน้านี้จะรับค่าจากเครื่องสแกนโดยตรง ไม่ต้องแตะจอ และคีย์บอร์ดบนจอจะไม่เด้ง</p>
   <div class="err" id="setupErr"></div>
   <button class="btn" id="startBtn" onclick="start()">เริ่มสแกน</button>
   <p>ใช้ได้ทั้ง iPhone และ Android · เปิดจากเบราว์เซอร์ปกติ ครั้งแรกจะถามสิทธิ์ใช้กล้อง ให้กด "อนุญาต"</p>
@@ -77,6 +98,13 @@
     <div class="frame"></div>
     <div class="hint" id="hint">เล็ง QR บนบัตรให้อยู่ในกรอบ</div>
   </div>
+  <div class="hid" id="hidPanel" onclick="focusHid(true)">
+    <div class="ic">▦</div>
+    <h2>พร้อมสแกน – ยิง QR บนบัตรได้เลย</h2>
+    <p>ระบบรับค่าจากเครื่องสแกนอัตโนมัติ ไม่ต้องแตะจอ · ถ้าเครื่องสแกนยิงแล้วไม่ขึ้นผล แตะที่นี่หนึ่งครั้ง</p>
+    <span class="live" id="hidLive">รอรับค่า…</span>
+    <input id="hidIn" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="ช่องรับค่าจากเครื่องสแกน">
+  </div>
   <div class="bottom">
     <div class="manual">
       <input id="manual" placeholder="หรือพิมพ์รหัส เช่น S057-K7QX" autocapitalize="characters" autocomplete="off">
@@ -92,18 +120,30 @@
   <div class="code" id="rCode"></div>
   <div class="sub" id="rSub"></div>
   <div class="clock" id="rClock"></div>
-  <div class="tap">แตะเพื่อสแกนใบต่อไป</div>
+  <div class="force" id="force" onclick="event.stopPropagation()">
+    <button class="fbtn" id="forceAsk" onclick="forceAsk()">ปล่อยผ่าน – มอบของแม้ยังไม่ตอบผ่าน</button>
+    <div id="forceConfirm" style="display:none; width:100%; flex-direction:column; gap:10px; align-items:center;">
+      <input id="forceName" placeholder="ชื่อผู้รับ (ถ้าทราบ – ไม่บังคับ)" autocomplete="off">
+      <input id="forceNote" placeholder="เหตุผล เช่น วิทยากร / ผู้บริหารขอ / เน็ตล่ม" autocomplete="off">
+      <button class="fbtn go" onclick="forceGo()">ยืนยันปล่อยผ่าน และบันทึกว่ารับของแล้ว</button>
+      <div class="note">จะบันทึกชื่อช่องนี้ เวลา และเหตุผลไว้ในชีต "รหัส" และ "บันทึก"</div>
+    </div>
+  </div>
+  <div class="tap" id="tapHint">แตะเพื่อสแกนใบต่อไป</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script>
   var DEFAULT_API = 'https://script.google.com/macros/s/AKfycbx-Lp7HZ-pC85wT38CYtdH5D9css-n0nSI7npU8N_Ixx96N4EA7T-7b6dUkAOnrfftJaw/exec';
-  var cfg = { api: DEFAULT_API, pin: '', lane: 'M1' };
+  var cfg = { api: DEFAULT_API, pin: '', lane: 'M1', mode: 'cam' };
   try { var saved = JSON.parse(localStorage.getItem('scanCfg') || '{}'); if (saved.pin) cfg = saved; } catch (e) {}
   if (!cfg.api || /__API/.test(cfg.api)) cfg.api = DEFAULT_API;
   document.getElementById('api').value = cfg.api || '';
   document.getElementById('pin').value = cfg.pin || '';
   document.getElementById('lane').value = cfg.lane || 'M1';
+  document.getElementById('mode').value = cfg.mode || 'cam';
+  function modeHint() { document.getElementById('modeHint').style.display = document.getElementById('mode').value === 'hid' ? 'block' : 'none'; }
+  modeHint();
 
   // เรียก Apps Script แบบไม่แนบคุกกี้ (fetch) ถ้าเบราว์เซอร์ไม่ยอมให้ข้ามโดเมน ใช้ JSONP สำรอง
   function api(P) {
@@ -129,12 +169,13 @@
   var lastCode = '', lastAt = 0, detector = null, canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
   var audioCtx = null, resultTimer = null, clockTimer = null;
 
-  function openSetup() { stopCam(); document.getElementById('setup').classList.add('show'); }
+  function openSetup() { stopCam(); hidActive = false; document.body.classList.remove('hidmode'); document.getElementById('setup').classList.add('show'); }
 
   function start() {
     cfg.api = document.getElementById('api').value.trim();
     cfg.pin = document.getElementById('pin').value.trim();
     cfg.lane = document.getElementById('lane').value;
+    cfg.mode = document.getElementById('mode').value;
     var err = document.getElementById('setupErr');
     if (!/^https:\/\/script\.google\.com\/macros\//.test(cfg.api)) { err.textContent = 'ที่อยู่ระบบไม่ถูกต้อง (ต้องขึ้นต้นด้วย https://script.google.com/macros/)'; return; }
     if (!cfg.pin) { err.textContent = 'กรุณาใส่ PIN'; return; }
@@ -149,7 +190,7 @@
       err.textContent = '';
       document.getElementById('setup').classList.remove('show');
       try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
-      startCam();
+      if (cfg.mode === 'hid') startHid(); else { document.body.classList.remove('hidmode'); startCam(); }
     }).catch(function (e) { document.getElementById('startBtn').disabled = false; err.textContent = 'เชื่อมต่อไม่ได้: ' + e.message; });
   }
 
@@ -215,6 +256,7 @@
     if (!code) { document.getElementById('manual').value = ''; document.getElementById('manual').placeholder = 'รูปแบบรหัสไม่ถูกต้อง'; return; }
     document.getElementById('manual').value = '';
     document.getElementById('manual').blur();
+    if (hidActive) setTimeout(function () { focusHid(true); }, 60);
     redeem(code);
   }
 
@@ -225,18 +267,93 @@
       busy = false;
       if (!r) { showResult('warn', 'ไม่มีการตอบกลับ', '', code, 'ลองอีกครั้ง'); return; }
       if (r.error) { showResult('warn', r.error, '', code, ''); beep(false); return; }
-      if (r.state === 'redeemed_now') { showResult('ok', '✅ มอบของได้', r.name, r.code, 'ตอบถูก ' + (r.score || '') + ' · บันทึกเวลาแล้ว'); beep(true); }
+      if (r.state === 'redeemed_now') { showResult('ok', '✅ มอบของได้', r.name, r.code, 'ตอบถูก ' + (r.score || '') + ' · บันทึกเวลาแล้ว'); beep(true); bump(); }
+      else if (r.state === 'forced_now') { showResult('ok', '✅ ปล่อยผ่าน – มอบของได้', r.name, r.code, 'บันทึกแล้ว'); beep(true); bump(); }
       else if (r.state === 'already') { showResult('bad', '❌ รับไปแล้ว', r.name, r.code, 'เมื่อ ' + (r.at || '')); beep(false); }
       else if (r.state === 'notfound') { showResult('bad', '❌ ไม่พบรหัสนี้', '', r.code, 'ตรวจสอบบัตรกับเจ้าหน้าที่'); beep(false); }
-      else { showResult('warn', '⚠ ยังไม่ผ่าน', r.name, r.code, 'ให้ผู้เข้าร่วมสแกน QR ตอบคำถามก่อน'); beep(false); }
+      else { showResult('warn', '⚠ ยังไม่ผ่าน', r.name, r.code, 'ให้ผู้เข้าร่วมสแกน QR ตอบคำถามก่อน', true); beep(false); }
       addHist(r.state, r.code, r.name);
-      if (r.state === 'redeemed_now') { var c = document.getElementById('cRedeemed'); if (c.textContent !== '–') { c.textContent = Number(c.textContent) + 1; var l = document.getElementById('cLeft'); } }
     }).catch(function (e) { busy = false; showResult('warn', 'เชื่อมต่อไม่ได้', '', code, e.message + ' – ลองใหม่'); });
   }
 
-  function showResult(kind, big, name, code, sub) {
+  // ---------- โหมดเครื่องสแกนบาร์โค้ด (HID = เครื่องพิมพ์ค่าเหมือนคีย์บอร์ดแล้วกด Enter) ----------
+  var hidActive = false, hidBuf = '', hidTimer = null;
+  var hidIn = document.getElementById('hidIn');
+  function startHid() {
+    hidActive = true;
+    document.body.classList.add('hidmode');
+    document.getElementById('hint').textContent = '';
+    focusHid();
+  }
+  function focusHid(force) {
+    if (!hidActive) return;
+    var a = document.activeElement;
+    if (!force && a && a !== hidIn && (a.tagName === 'INPUT' || a.tagName === 'SELECT')) return; // เจ้าหน้าที่กำลังพิมพ์ในช่องอื่น (รหัสมือ/ปล่อยผ่าน)
+    try { hidIn.focus({ preventScroll: true }); } catch (e) { hidIn.focus(); }
+    document.getElementById('hidLive').className = 'live ' + (document.activeElement === hidIn ? 'on' : '');
+    document.getElementById('hidLive').textContent = document.activeElement === hidIn ? 'พร้อมรับค่าจากเครื่องสแกน ●' : 'แตะหน้าจอหนึ่งครั้งเพื่อเริ่มรับค่า';
+  }
+  function hidSubmit() {
+    var raw = hidIn.value; hidIn.value = '';
+    if (!raw.trim()) return;
+    var code = extractCode(raw);
+    if (!code) { showResult('warn', 'อ่านรหัสไม่ได้', '', raw.slice(0, 40), 'ตรวจว่าคีย์บอร์ดระบบเป็น EN แล้วยิงใหม่'); beep(false); return; }
+    var now = Date.now();
+    if (code === lastCode && now - lastAt < 2500) return;
+    lastCode = code; lastAt = now;
+    redeem(code);
+  }
+  hidIn.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); hidSubmit(); }
+  });
+  // เครื่องสแกนบางรุ่นไม่ส่ง Enter → ถ้าหยุดพิมพ์เกิน 250 ms และมีรหัสครบ ให้ส่งเอง
+  hidIn.addEventListener('input', function () {
+    if (hidTimer) clearTimeout(hidTimer);
+    hidTimer = setTimeout(function () { if (extractCode(hidIn.value)) hidSubmit(); }, 250);
+  });
+  hidIn.addEventListener('blur', function () { if (hidActive) setTimeout(focusHid, 120); });
+  document.addEventListener('keydown', function (e) {
+    // ถ้าโฟกัสหลุดไปที่อื่น (ไม่ใช่ช่องกรอก) ให้ดึงตัวอักษรจากเครื่องสแกนกลับมาที่ช่องรับค่า
+    if (!hidActive) return;
+    var a = document.activeElement;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return;
+    focusHid();
+  });
+
+  // ---------- ปล่อยผ่าน (มอบของแม้ยังไม่ตอบผ่าน) ----------
+  var forceCode = '';
+  function forceAsk() {
+    if (resultTimer) clearTimeout(resultTimer);
+    document.getElementById('forceAsk').style.display = 'none';
+    var fc = document.getElementById('forceConfirm'); fc.style.display = 'flex';
+    document.getElementById('tapHint').textContent = 'แตะพื้นหลังเพื่อยกเลิก';
+    setTimeout(function () { document.getElementById('forceName').focus(); }, 50);
+  }
+  function forceGo() {
+    var code = forceCode; if (!code) return;
+    var name = document.getElementById('forceName').value.trim(), note = document.getElementById('forceNote').value.trim();
+    busy = true;
+    showResult('busy', 'กำลังบันทึกปล่อยผ่าน…', name, code, '');
+    api({ action: 'redeem', code: code, pin: cfg.pin, lane: cfg.lane, force: '1', name: name, note: note }).then(function (r) {
+      busy = false;
+      if (!r || r.error) { showResult('warn', (r && r.error) || 'ไม่มีการตอบกลับ', '', code, 'ลองอีกครั้ง'); beep(false); return; }
+      if (r.state === 'forced_now' || r.state === 'redeemed_now') { showResult('ok', '✅ ปล่อยผ่าน – มอบของได้', r.name || name, r.code, 'บันทึกเวลา/ช่อง ' + cfg.lane + ' แล้ว' + (note ? ' · ' + note : '')); beep(true); bump(); }
+      else if (r.state === 'already') { showResult('bad', '❌ รับไปแล้ว', r.name, r.code, 'เมื่อ ' + (r.at || '')); beep(false); }
+      else { showResult('warn', r.msg || 'ไม่สำเร็จ', r.name, r.code, ''); beep(false); }
+      addHist(r.state, r.code, r.name || name);
+    }).catch(function (e) { busy = false; showResult('warn', 'เชื่อมต่อไม่ได้', '', code, e.message + ' – ลองใหม่'); });
+  }
+  function bump() { var c = document.getElementById('cRedeemed'); if (c.textContent !== '–') { c.textContent = Number(c.textContent) + 1; var l = document.getElementById('cLeft'); if (l.textContent !== '–') l.textContent = Math.max(0, Number(l.textContent) - 1); } }
+
+  function showResult(kind, big, name, code, sub, canForce) {
     var el = document.getElementById('result');
     el.className = 'result show ' + kind;
+    forceCode = canForce ? code : '';
+    document.getElementById('force').className = 'force' + (canForce ? ' show' : '');
+    document.getElementById('forceAsk').style.display = '';
+    document.getElementById('forceConfirm').style.display = 'none';
+    document.getElementById('forceName').value = ''; document.getElementById('forceNote').value = '';
+    document.getElementById('tapHint').textContent = canForce ? 'แตะพื้นหลังเพื่อสแกนใบต่อไป' : 'แตะเพื่อสแกนใบต่อไป';
     document.getElementById('rBig').textContent = big;
     document.getElementById('rName').textContent = name || '';
     document.getElementById('rCode').textContent = code || '';
@@ -246,10 +363,10 @@
     function tickClock() { var n = new Date(); ck.textContent = [n.getHours(), n.getMinutes(), n.getSeconds()].map(function (x) { return ('0' + x).slice(-2); }).join(':'); }
     tickClock(); clockTimer = setInterval(tickClock, 1000);
     if (resultTimer) clearTimeout(resultTimer);
-    if (kind !== 'busy') resultTimer = setTimeout(closeResult, kind === 'ok' ? 3500 : 6000);
+    if (kind !== 'busy') resultTimer = setTimeout(closeResult, kind === 'ok' ? 3500 : (canForce ? 12000 : 6000));
     if (navigator.vibrate) navigator.vibrate(kind === 'ok' ? 120 : [80, 60, 80]);
   }
-  function closeResult() { if (busy) return; document.getElementById('result').className = 'result'; if (clockTimer) clearInterval(clockTimer); }
+  function closeResult() { if (busy) return; document.getElementById('result').className = 'result'; if (clockTimer) clearInterval(clockTimer); forceCode = ''; if (hidActive) setTimeout(function () { focusHid(true); }, 50); }
 
   function beep(good) {
     if (!audioCtx) return;
@@ -263,19 +380,19 @@
 
   var hist = [];
   function addHist(state, code, name) {
-    var color = state === 'redeemed_now' ? 'var(--ok)' : (state === 'notpassed' ? 'var(--warn)' : 'var(--bad)');
+    var color = (state === 'redeemed_now' || state === 'forced_now') ? 'var(--ok)' : (state === 'notpassed' ? 'var(--warn)' : 'var(--bad)');
     var t = new Date(); var ts = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2);
     hist.unshift({ color: color, code: code, name: name || '', ts: ts, state: state });
     hist = hist.slice(0, 20);
     document.getElementById('hist').innerHTML = hist.map(function (h) {
       return '<div><span class="dot" style="background:' + h.color + '"></span><span>' + h.ts + '</span><span class="code">' + esc(h.code) + '</span><span>' +
-        esc(h.state === 'redeemed_now' ? 'มอบแล้ว' : h.state === 'already' ? 'รับไปแล้ว' : h.state === 'notfound' ? 'ไม่พบ' : 'ยังไม่ผ่าน') + '</span><span>' + esc(h.name) + '</span></div>';
+        esc(h.state === 'redeemed_now' ? 'มอบแล้ว' : h.state === 'forced_now' ? 'ปล่อยผ่าน' : h.state === 'already' ? 'รับไปแล้ว' : h.state === 'notfound' ? 'ไม่พบ' : 'ยังไม่ผ่าน') + '</span><span>' + esc(h.name) + '</span></div>';
     }).join('');
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
   document.getElementById('manual').addEventListener('keydown', function (e) { if (e.key === 'Enter') manualGo(); });
-  document.addEventListener('visibilitychange', function () { if (document.hidden) stopCam(); else if (!document.getElementById('setup').classList.contains('show') && !stream) startCam(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden) stopCam(); else if (!document.getElementById('setup').classList.contains('show')) { if (hidActive) focusHid(); else if (!stream) startCam(); } });
 </script>
 </body>
 </html>
