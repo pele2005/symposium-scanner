@@ -267,7 +267,7 @@
       busy = false;
       if (!r) { showResult('warn', 'ไม่มีการตอบกลับ', '', code, 'ลองอีกครั้ง'); return; }
       if (r.error) { showResult('warn', r.error, '', code, ''); beep(false); return; }
-      if (r.state === 'redeemed_now') { showResult('ok', '✅ มอบของได้', r.name, r.code, 'ตอบถูก ' + (r.score || '') + ' · บันทึกเวลาแล้ว'); beep(true); bump(); }
+      if (r.state === 'redeemed_now') { showResult('ok', '✅ มอบของได้', r.name, r.code, (r.score && r.score !== 'สำรวจ' ? 'ตอบถูก ' + r.score + ' · ' : '') + 'บันทึกเวลาแล้ว'); beep(true); bump(); }
       else if (r.state === 'forced_now') { showResult('ok', '✅ ปล่อยผ่าน – มอบของได้', r.name, r.code, 'บันทึกแล้ว'); beep(true); bump(); }
       else if (r.state === 'already') { showResult('bad', '❌ รับไปแล้ว', r.name, r.code, 'เมื่อ ' + (r.at || '')); beep(false); }
       else if (r.state === 'notfound') { showResult('bad', '❌ ไม่พบรหัสนี้', '', r.code, 'ตรวจสอบบัตรกับเจ้าหน้าที่'); beep(false); }
