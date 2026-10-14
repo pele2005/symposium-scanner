@@ -79,6 +79,7 @@ function initSheets() {
       ['ASK_PHONE', 'OPTIONAL', 'เบอร์มือถือ: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม'],
       ['ASK_LINE', 'OPTIONAL', 'LINE ID: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม'],
       ['ASK_HOSPITAL', 'TRUE', 'ชื่อโรงพยาบาล/สถานพยาบาล: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม'],
+      ['HOSPITAL_LABEL', 'โรงพยาบาล / สถานพยาบาล', 'ชื่อช่องสถานที่ทำงานในฟอร์ม (OTC ใช้ "ร้านยา / สถานที่ทำงาน")'],
       ['ASK_SPECIALTY', 'TRUE', 'Specialty (dropdown): TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม'],
       ['SPECIALTY_LIST', DEFAULT_SPECIALTIES, 'รายการ Specialty ตามลำดับที่ต้องการ คั่นด้วย ;'],
       ['THANKS_EMAIL', 'FALSE', 'TRUE = ส่งอีเมลขอบคุณ+ยืนยันการรับของ หลังสแกนรับของ (ใช้โควตาสคริปต์ 100 ฉบับ/วันช่วงทดลอง Workspace, 1,500/วันเมื่อเป็นบัญชีเต็ม – ที่เกินจะค้างแล้วส่งต่อวันถัดไป)'],
@@ -201,6 +202,7 @@ function getSettings_() {
   var ln = ask3_(s.ASK_LINE, 'FALSE'); s.ASK_LINE = ln.ask; s.LINE_REQUIRED = ln.req;
   var ho = ask3_(s.ASK_HOSPITAL, 'FALSE'); s.ASK_HOSPITAL = ho.ask; s.HOSPITAL_REQUIRED = ho.req;
   var sp = ask3_(s.ASK_SPECIALTY, 'FALSE'); s.ASK_SPECIALTY = sp.ask; s.SPECIALTY_REQUIRED = sp.req;
+  s.HOSPITAL_LABEL = String(s.HOSPITAL_LABEL || 'โรงพยาบาล / สถานพยาบาล').trim();
   s.SPECIALTY_LIST = String(s.SPECIALTY_LIST || DEFAULT_SPECIALTIES).split(';').map(function (x) { return x.trim(); }).filter(String);
   s.START_TIME = toDate_(s.START_TIME);
   s.END_TIME = toDate_(s.END_TIME);
@@ -310,7 +312,7 @@ function createForm() {
   ids.code = codeItem.getId();
   ids.name = form.addTextItem().setTitle('ชื่อ-นามสกุล').setRequired(true).getId();
   if (s.ASK_HOSPITAL) {
-    ids.hospital = form.addTextItem().setTitle('โรงพยาบาล / สถานพยาบาล').setRequired(s.HOSPITAL_REQUIRED).getId();
+    ids.hospital = form.addTextItem().setTitle(s.HOSPITAL_LABEL).setRequired(s.HOSPITAL_REQUIRED).getId();
   }
   if (s.ASK_SPECIALTY) {
     ids.specialty = form.addListItem().setTitle('Specialty').setChoiceValues(s.SPECIALTY_LIST).setRequired(s.SPECIALTY_REQUIRED).getId();
@@ -869,6 +871,7 @@ function ensureSchemaMenu() {
   defaults.push(['ASK_PHONE', 'OPTIONAL', 'เบอร์มือถือ: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
   defaults.push(['ASK_LINE', 'OPTIONAL', 'LINE ID: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
   defaults.push(['ASK_HOSPITAL', 'TRUE', 'ชื่อโรงพยาบาล/สถานพยาบาล: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
+  defaults.push(['HOSPITAL_LABEL', 'โรงพยาบาล / สถานพยาบาล', 'ชื่อช่องสถานที่ทำงานในฟอร์ม (OTC ใช้ "ร้านยา / สถานที่ทำงาน")']);
   defaults.push(['ASK_SPECIALTY', 'TRUE', 'Specialty (dropdown): TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
   defaults.push(['SPECIALTY_LIST', DEFAULT_SPECIALTIES, 'รายการ Specialty ตามลำดับที่ต้องการ คั่นด้วย ;']);
   var added = [];
