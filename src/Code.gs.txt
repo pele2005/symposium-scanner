@@ -74,7 +74,7 @@ function initSheets() {
       ['MIN_SCORE', '', 'จำนวนข้อที่ต้องตอบถูกขั้นต่ำ (เว้นว่าง = ต้องถูกทุกข้อ, 0 = ไม่ตรวจ)'],
       ['STAFF_PIN', '2468', 'PIN เจ้าหน้าที่ สำหรับกดยืนยันมอบของ (เปลี่ยนทุกงาน!)'],
       ['SEND_EMAIL', 'FALSE', 'TRUE = ส่งอีเมลผลจากสคริปต์ (ติดโควตา 100–1,500 ฉบับ/วัน) – ปกติปล่อย FALSE แล้วใช้ "ส่งสำเนาคำตอบ" ในตั้งค่าฟอร์มแทน'],
-      ['ASK_LICENSE', 'TRUE', 'TRUE = ถามเลขใบประกอบวิชาชีพ และใช้กันรับซ้ำ'],
+      ['ASK_LICENSE', 'OPTIONAL', 'TRUE = ถามเลขใบประกอบวิชาชีพแบบบังคับ, OPTIONAL = ถามแต่ไม่บังคับ (กันรับซ้ำเฉพาะคนที่กรอก), FALSE = ไม่ถาม'],
       ['THANKS_EMAIL', 'FALSE', 'TRUE = ส่งอีเมลขอบคุณ+ยืนยันการรับของ หลังสแกนรับของ (ใช้โควตาสคริปต์ 100 ฉบับ/วันช่วงทดลอง Workspace, 1,500/วันเมื่อเป็นบัญชีเต็ม – ที่เกินจะค้างแล้วส่งต่อวันถัดไป)'],
       ['THANKS_TEXT', 'ขอบคุณที่ร่วมกิจกรรมตอบคำถามกับ TRB Chemedica หวังว่าของที่ระลึกชิ้นนี้จะเป็นประโยชน์ และหวังว่าจะได้พบท่านอีกในงานครั้งต่อไป', 'ข้อความขอบคุณในอีเมล (ระบบจะเติมชื่อ/เวลารับของ/รหัสบัตรให้เอง)'],
       ['REDEEM_NOTE', 'รับของที่ระลึกได้ที่บูธ TRB ระหว่างเวลา 12:00–16:00 น. (ทยอยมาได้ตลอดช่วงเวลา ไม่ต้องรีบมารับพร้อมกัน)', 'ข้อความบอกสถานที่/เวลารับของ แสดงหลังส่งคำตอบสำเร็จ'],
@@ -93,8 +93,9 @@ function initSheets() {
   if (!ss.getSheetByName(SH_QUESTIONS)) {
     var q = ss.insertSheet(SH_QUESTIONS);
     var qrows = [
-      ['คำถาม', 'ตัวเลือก (คั่นด้วย ; )', 'คำตอบที่ถูก (พิมพ์ให้ตรงกับตัวเลือก)'],
+      ['คำถาม', 'ตัวเลือก (คั่นด้วย ; )', 'คำตอบที่ถูก (พิมพ์ให้ตรงกับตัวเลือก หรือใช้ตัวอักษรนำหน้า เช่น A;C – หลายคำตอบคั่นด้วย ; = ข้อเลือกได้หลายข้อ)'],
       ['ตัวอย่างคำถามที่ 1: ... (แก้เป็นคำถามจากเนื้อหาการบรรยาย)', 'ตัวเลือก ก;ตัวเลือก ข;ตัวเลือก ค;ตัวเลือก ง', 'ตัวเลือก ข'],
+      ['ตัวอย่างข้อที่เลือกได้มากกว่า 1 ข้อ: ... (เลือกได้มากกว่า 1 ข้อ)', 'A. ตัวเลือกหนึ่ง;B. ตัวเลือกสอง;C. ตัวเลือกสาม;D. ตัวเลือกสี่', 'A;C;D'],
       ['ตัวอย่างคำถามที่ 2: ...', 'ใช่;ไม่ใช่', 'ใช่'],
       ['ตัวอย่างคำถามที่ 3: ...', '10%;25%;50%;75%', '50%']
     ];
@@ -187,7 +188,9 @@ function getSettings_() {
   s.PRIZE_LIMIT = Number(s.PRIZE_LIMIT) || 0;
   s.CODE_COUNT = Number(s.CODE_COUNT) || 0;
   s.SEND_EMAIL = String(s.SEND_EMAIL).toUpperCase() === 'TRUE';
-  s.ASK_LICENSE = String(s.ASK_LICENSE).toUpperCase() !== 'FALSE';
+  var lic = String(s.ASK_LICENSE || 'TRUE').trim().toUpperCase();
+  s.ASK_LICENSE = lic !== 'FALSE';
+  s.LICENSE_REQUIRED = lic === 'TRUE';
   s.START_TIME = toDate_(s.START_TIME);
   s.END_TIME = toDate_(s.END_TIME);
   s.SECRET_WORD = String(s.SECRET_WORD || '').trim();
@@ -230,12 +233,37 @@ function getQuestions_() {
   return sh.getRange(2, 1, sh.getLastRow() - 1, 3).getDisplayValues()
     .filter(function (r) { return String(r[0]).trim() !== ''; })
     .map(function (r) {
+      var choices = String(r[1]).split(';').map(function (x) { return x.trim(); }).filter(String);
+      var answers = String(r[2]).split(';').map(function (x) { return x.trim(); }).filter(String)
+        .map(function (a) { return resolveChoice_(choices, a) || a; });
+      var title = String(r[0]).trim();
       return {
-        title: String(r[0]).trim(),
-        choices: String(r[1]).split(';').map(function (x) { return x.trim(); }).filter(String),
-        answer: String(r[2]).trim()
+        title: title,
+        choices: choices,
+        answers: answers,
+        answer: answers.join(';'),
+        multi: answers.length > 1 || /มากกว่า\s*1|หลายข้อ|multiple/i.test(title)
       };
     });
+}
+
+/** จับคู่คำตอบกับตัวเลือก: ตรงทั้งข้อความ หรือระบุแค่ตัวอักษรนำหน้า (A / ก / 1) */
+function resolveChoice_(choices, token) {
+  token = String(token || '').trim();
+  if (!token) return '';
+  for (var i = 0; i < choices.length; i++) if (choices[i] === token) return choices[i];
+  var tl = token.toLowerCase().replace(/[\.\)]\s*$/, '');
+  for (var j = 0; j < choices.length; j++) {
+    var m = choices[j].match(/^([A-Za-z]|[ก-ฮ]|\d{1,2})\s*[\.\)]\s*/);
+    if (m && m[1].toLowerCase() === tl) return choices[j];
+  }
+  for (var k = 0; k < choices.length; k++) if (choices[k].toLowerCase() === token.toLowerCase()) return choices[k];
+  return '';
+}
+function sameSet_(a, b) {
+  if (a.length !== b.length) return false;
+  var m = {}; a.forEach(function (x) { m[x] = true; });
+  return b.every(function (x) { return m[x]; });
 }
 
 // ---------- 2) สร้างฟอร์ม ----------
@@ -253,7 +281,8 @@ function createForm() {
   var qs = getQuestions_();
   qs.forEach(function (q, i) {
     if (q.choices.length < 2) throw new Error('คำถามข้อ ' + (i + 1) + ' มีตัวเลือกน้อยกว่า 2 ตัว');
-    if (q.choices.indexOf(q.answer) < 0) throw new Error('คำถามข้อ ' + (i + 1) + ': คำตอบที่ถูก "' + q.answer + '" ไม่ตรงกับตัวเลือกใด');
+    if (!q.answers.length) throw new Error('คำถามข้อ ' + (i + 1) + ' ยังไม่ได้ใส่คำตอบที่ถูก');
+    q.answers.forEach(function (a) { if (q.choices.indexOf(a) < 0) throw new Error('คำถามข้อ ' + (i + 1) + ': คำตอบที่ถูก "' + a + '" ไม่ตรงกับตัวเลือกใด'); });
   });
 
   var form = FormApp.create(s.EVENT_NAME + ' – ตอบคำถามรับของที่ระลึก');
@@ -269,7 +298,9 @@ function createForm() {
   ids.code = codeItem.getId();
   ids.name = form.addTextItem().setTitle('ชื่อ-นามสกุล').setRequired(true).getId();
   if (s.ASK_LICENSE) {
-    ids.license = form.addTextItem().setTitle('เลขใบประกอบวิชาชีพ').setHelpText('ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น').setRequired(true).getId();
+    ids.license = form.addTextItem().setTitle('เลขใบประกอบวิชาชีพ' + (s.LICENSE_REQUIRED ? '' : ' (ไม่บังคับ)'))
+      .setHelpText(s.LICENSE_REQUIRED ? 'ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น' : 'กรอกได้ถ้าสะดวก – ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น')
+      .setRequired(s.LICENSE_REQUIRED).getId();
   }
   var phoneItem = form.addTextItem().setTitle('เบอร์โทรศัพท์มือถือ').setRequired(true);
   phoneItem.setValidation(FormApp.createTextValidation().requireTextMatchesPattern('^0[0-9\\- ]{8,11}$')
@@ -288,9 +319,10 @@ function createForm() {
 
   if (qs.length) form.addSectionHeaderItem().setTitle('คำถามจากการบรรยาย');
   ids.questions = qs.map(function (q) {
-    var it = form.addMultipleChoiceItem().setTitle(q.title).setRequired(true);
-    it.setChoiceValues(q.choices);
-    return { id: it.getId(), answer: q.answer };
+    var it = q.multi ? form.addCheckboxItem() : form.addMultipleChoiceItem();
+    it.setTitle(q.title).setRequired(true).setChoiceValues(q.choices);
+    if (q.multi && !/มากกว่า\s*1|หลายข้อ/.test(q.title)) it.setHelpText('เลือกได้มากกว่า 1 ข้อ');
+    return { id: it.getId(), answer: q.answer, answers: q.answers, multi: !!q.multi };
   });
 
   ids.consent = form.addCheckboxItem()
@@ -481,7 +513,12 @@ function processResponse_(resp) {
   };
 
   var score = 0;
-  (ids.questions || []).forEach(function (q) { if (String(ans[q.id] || '').trim() === q.answer) score++; });
+  (ids.questions || []).forEach(function (q) {
+    var got = ans[q.id];
+    var picked = (Array.isArray(got) ? got : String(got || '').split(/\s*;\s*/)).map(function (x) { return String(x).trim(); }).filter(String);
+    var want = q.answers || String(q.answer || '').split(';').map(function (x) { return x.trim(); }).filter(String);
+    if (sameSet_(picked, want)) score++;   // ข้อเลือกหลายข้อต้องเลือกครบและไม่เกิน
+  });
   var total = (ids.questions || []).length;
   var minScore = (s.MIN_SCORE === '' || s.MIN_SCORE === null || s.MIN_SCORE === undefined) ? total : Number(s.MIN_SCORE);
   d.score = score + '/' + total;
