@@ -24,8 +24,9 @@ var ST_PASSED = 'ตอบผ่าน';
 var ST_REDEEMED = 'รับแล้ว';
 
 // คอลัมน์ในชีต "รหัส" (1-based)
-var C = { CODE: 1, STATUS: 2, NAME: 3, LICENSE: 4, PHONE: 5, EMAIL: 6, SCORE: 7, ANSWERED_AT: 8, REDEEMED_AT: 9, LINK: 10, NOTE: 11, THANKS: 12 };
-var CODE_HEADERS = ['รหัสบัตร', 'สถานะ', 'ชื่อ-นามสกุล', 'เลขใบประกอบวิชาชีพ', 'เบอร์โทร', 'อีเมล', 'คะแนน', 'เวลาตอบผ่าน', 'เวลารับของ', 'ลิงก์บัตร (ใช้พิมพ์ QR)', 'หมายเหตุ (ปล่อยผ่าน/ช่อง)', 'อีเมลขอบคุณ'];
+var C = { CODE: 1, STATUS: 2, NAME: 3, LICENSE: 4, PHONE: 5, EMAIL: 6, SCORE: 7, ANSWERED_AT: 8, REDEEMED_AT: 9, LINK: 10, NOTE: 11, THANKS: 12, LINE: 13, HOSPITAL: 14, SPECIALTY: 15 };
+var CODE_HEADERS = ['รหัสบัตร', 'สถานะ', 'ชื่อ-นามสกุล', 'เลขใบประกอบวิชาชีพ', 'เบอร์โทร', 'อีเมล', 'คะแนน', 'เวลาตอบผ่าน', 'เวลารับของ', 'ลิงก์บัตร (ใช้พิมพ์ QR)', 'หมายเหตุ (ปล่อยผ่าน/ช่อง)', 'อีเมลขอบคุณ', 'LINE ID', 'โรงพยาบาล/สถานพยาบาล', 'Specialty'];
+var DEFAULT_SPECIALTIES = 'General;Hip & Knee;Spine;Sport;MBOG;Pediatric;Foot & Ankle;Hand;Rehab;Rheumatology;Trauma;Tumor;Other';
 var TH_PENDING = 'รอส่ง';
 
 // ตัวอักษรที่ไม่สับสนกัน (ไม่มี 0/O, 1/I/L, 5/S, 8/B, 2/Z)
@@ -75,6 +76,11 @@ function initSheets() {
       ['STAFF_PIN', '2468', 'PIN เจ้าหน้าที่ สำหรับกดยืนยันมอบของ (เปลี่ยนทุกงาน!)'],
       ['SEND_EMAIL', 'FALSE', 'TRUE = ส่งอีเมลผลจากสคริปต์ (ติดโควตา 100–1,500 ฉบับ/วัน) – ปกติปล่อย FALSE แล้วใช้ "ส่งสำเนาคำตอบ" ในตั้งค่าฟอร์มแทน'],
       ['ASK_LICENSE', 'OPTIONAL', 'TRUE = ถามเลขใบประกอบวิชาชีพแบบบังคับ, OPTIONAL = ถามแต่ไม่บังคับ (กันรับซ้ำเฉพาะคนที่กรอก), FALSE = ไม่ถาม'],
+      ['ASK_PHONE', 'OPTIONAL', 'เบอร์มือถือ: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม'],
+      ['ASK_LINE', 'OPTIONAL', 'LINE ID: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม'],
+      ['ASK_HOSPITAL', 'TRUE', 'ชื่อโรงพยาบาล/สถานพยาบาล: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม'],
+      ['ASK_SPECIALTY', 'TRUE', 'Specialty (dropdown): TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม'],
+      ['SPECIALTY_LIST', DEFAULT_SPECIALTIES, 'รายการ Specialty ตามลำดับที่ต้องการ คั่นด้วย ;'],
       ['THANKS_EMAIL', 'FALSE', 'TRUE = ส่งอีเมลขอบคุณ+ยืนยันการรับของ หลังสแกนรับของ (ใช้โควตาสคริปต์ 100 ฉบับ/วันช่วงทดลอง Workspace, 1,500/วันเมื่อเป็นบัญชีเต็ม – ที่เกินจะค้างแล้วส่งต่อวันถัดไป)'],
       ['THANKS_TEXT', 'ขอบคุณที่ร่วมกิจกรรมตอบคำถามกับ TRB Chemedica หวังว่าของที่ระลึกชิ้นนี้จะเป็นประโยชน์ และหวังว่าจะได้พบท่านอีกในงานครั้งต่อไป', 'ข้อความขอบคุณในอีเมล (ระบบจะเติมชื่อ/เวลารับของ/รหัสบัตรให้เอง)'],
       ['REDEEM_NOTE', 'รับของที่ระลึกได้ที่บูธ TRB ระหว่างเวลา 12:00–16:00 น. (ทยอยมาได้ตลอดช่วงเวลา ไม่ต้องรีบมารับพร้อมกัน)', 'ข้อความบอกสถานที่/เวลารับของ แสดงหลังส่งคำตอบสำเร็จ'],
@@ -116,7 +122,7 @@ function initSheets() {
 
   if (!ss.getSheetByName(SH_LOG)) {
     var l = ss.insertSheet(SH_LOG);
-    l.getRange(1, 1, 1, 9).setValues([['เวลา', 'รหัสบัตร', 'ชื่อ-นามสกุล', 'เลขใบประกอบวิชาชีพ', 'เบอร์โทร', 'ผล', 'เหตุผล', 'คะแนน', 'Response ID']])
+    l.getRange(1, 1, 1, 12).setValues([['เวลา', 'รหัสบัตร', 'ชื่อ-นามสกุล', 'เลขใบประกอบวิชาชีพ', 'เบอร์โทร', 'ผล', 'เหตุผล', 'คะแนน', 'Response ID', 'LINE ID', 'โรงพยาบาล', 'Specialty']])
       .setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
     l.setFrozenRows(1);
   }
@@ -189,9 +195,13 @@ function getSettings_() {
   s.PRIZE_LIMIT = Number(s.PRIZE_LIMIT) || 0;
   s.CODE_COUNT = Number(s.CODE_COUNT) || 0;
   s.SEND_EMAIL = String(s.SEND_EMAIL).toUpperCase() === 'TRUE';
-  var lic = String(s.ASK_LICENSE || 'TRUE').trim().toUpperCase();
-  s.ASK_LICENSE = lic !== 'FALSE';
-  s.LICENSE_REQUIRED = lic === 'TRUE';
+  function ask3_(v, dflt) { var x = String(v === undefined || v === '' ? dflt : v).trim().toUpperCase(); return { ask: x !== 'FALSE', req: x === 'TRUE' }; }
+  var lic = ask3_(s.ASK_LICENSE, 'TRUE'); s.ASK_LICENSE = lic.ask; s.LICENSE_REQUIRED = lic.req;
+  var ph = ask3_(s.ASK_PHONE, 'TRUE'); s.ASK_PHONE = ph.ask; s.PHONE_REQUIRED = ph.req;
+  var ln = ask3_(s.ASK_LINE, 'FALSE'); s.ASK_LINE = ln.ask; s.LINE_REQUIRED = ln.req;
+  var ho = ask3_(s.ASK_HOSPITAL, 'FALSE'); s.ASK_HOSPITAL = ho.ask; s.HOSPITAL_REQUIRED = ho.req;
+  var sp = ask3_(s.ASK_SPECIALTY, 'FALSE'); s.ASK_SPECIALTY = sp.ask; s.SPECIALTY_REQUIRED = sp.req;
+  s.SPECIALTY_LIST = String(s.SPECIALTY_LIST || DEFAULT_SPECIALTIES).split(';').map(function (x) { return x.trim(); }).filter(String);
   s.START_TIME = toDate_(s.START_TIME);
   s.END_TIME = toDate_(s.END_TIME);
   s.SECRET_WORD = String(s.SECRET_WORD || '').trim();
@@ -299,15 +309,26 @@ function createForm() {
   var codeItem = form.addTextItem().setTitle('รหัสบัตร').setHelpText('ระบบกรอกให้อัตโนมัติจาก QR – กรุณาอย่าแก้ไข').setRequired(true);
   ids.code = codeItem.getId();
   ids.name = form.addTextItem().setTitle('ชื่อ-นามสกุล').setRequired(true).getId();
+  if (s.ASK_HOSPITAL) {
+    ids.hospital = form.addTextItem().setTitle('โรงพยาบาล / สถานพยาบาล' + (s.HOSPITAL_REQUIRED ? '' : ' (ไม่บังคับ)')).setRequired(s.HOSPITAL_REQUIRED).getId();
+  }
+  if (s.ASK_SPECIALTY) {
+    ids.specialty = form.addListItem().setTitle('Specialty' + (s.SPECIALTY_REQUIRED ? '' : ' (ไม่บังคับ)')).setChoiceValues(s.SPECIALTY_LIST).setRequired(s.SPECIALTY_REQUIRED).getId();
+  }
   if (s.ASK_LICENSE) {
     ids.license = form.addTextItem().setTitle('เลขใบประกอบวิชาชีพ' + (s.LICENSE_REQUIRED ? '' : ' (ไม่บังคับ)'))
       .setHelpText(s.LICENSE_REQUIRED ? 'ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น' : 'กรอกได้ถ้าสะดวก – ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น')
       .setRequired(s.LICENSE_REQUIRED).getId();
   }
-  var phoneItem = form.addTextItem().setTitle('เบอร์โทรศัพท์มือถือ').setRequired(true);
-  phoneItem.setValidation(FormApp.createTextValidation().requireTextMatchesPattern('^0[0-9\\- ]{8,11}$')
-    .setHelpText('กรุณากรอกเบอร์มือถือ 10 หลัก เช่น 0812345678').build());
-  ids.phone = phoneItem.getId();
+  if (s.ASK_PHONE) {
+    var phoneItem = form.addTextItem().setTitle('เบอร์โทรศัพท์มือถือ' + (s.PHONE_REQUIRED ? '' : ' (ไม่บังคับ)')).setRequired(s.PHONE_REQUIRED);
+    phoneItem.setValidation(FormApp.createTextValidation().requireTextMatchesPattern('^0[0-9\\- ]{8,11}$')
+      .setHelpText('กรุณากรอกเบอร์มือถือ 10 หลัก เช่น 0812345678').build());
+    ids.phone = phoneItem.getId();
+  }
+  if (s.ASK_LINE) {
+    ids.line = form.addTextItem().setTitle('LINE ID' + (s.LINE_REQUIRED ? '' : ' (ไม่บังคับ)')).setRequired(s.LINE_REQUIRED).getId();
+  }
   // อีเมล: ใช้ช่องอีเมลของ Google Form เอง (ผู้ตอบพิมพ์เอง) เพื่อให้ฟอร์ม "ส่งสำเนาคำตอบ" ให้ผู้ตอบได้โดยไม่ติดโควตาอีเมลของบัญชี
   try {
     form.setEmailCollectionType(FormApp.EmailCollectionType.RESPONDER_INPUT);
@@ -329,7 +350,7 @@ function createForm() {
 
   ids.consent = form.addCheckboxItem()
     .setTitle('การยินยอมให้เก็บข้อมูลส่วนบุคคล (PDPA)')
-    .setHelpText('ข้อมูลของท่านจะใช้เพื่อยืนยันสิทธิ์รับของที่ระลึกและบันทึกการเข้าร่วมงานนี้เท่านั้น')
+    .setHelpText('บริษัท ทีอาร์บี เคมีเดีย (ประเทศไทย) จำกัด จะเก็บข้อมูลของท่านเพื่อ (1) ยืนยันสิทธิ์รับของที่ระลึกและบันทึกการเข้าร่วมงานนี้ (2) วิเคราะห์คำตอบแบบสอบถามในภาพรวมเพื่อพัฒนาข้อมูลทางวิชาการ และ (3) ติดต่อแจ้งข้อมูลวิชาการ/กิจกรรมครั้งต่อไป โดยจะไม่เปิดเผยแก่บุคคลภายนอก ท่านขอถอนความยินยอมได้โดยติดต่อบริษัท')
     .setChoiceValues(['ข้าพเจ้ายินยอมให้เก็บและใช้ข้อมูลตามวัตถุประสงค์ข้างต้น'])
     .setRequired(true).getId();
 
@@ -380,7 +401,8 @@ function generateCodes() {
     var code;
     do { code = s.CODE_PREFIX + pad_(i, width) + '-' + randomChars_(4); } while (used[code]);
     used[code] = true;
-    rows.push([code, ST_EMPTY, '', '', '', '', '', '', '', '', '', '']);
+    var blank = [code, ST_EMPTY]; while (blank.length < CODE_HEADERS.length) blank.push('');
+    rows.push(blank);
   }
   ensureCodeCols_(sh);
   sh.getRange(existing + 2, 1, rows.length, CODE_HEADERS.length).setValues(rows);
@@ -509,7 +531,10 @@ function processResponse_(resp) {
     code: normCode_(ans[ids.code]),
     name: String(ans[ids.name] || '').trim(),
     license: ids.license ? normId_(ans[ids.license]) : '',
-    phone: normPhone_(ans[ids.phone]),
+    phone: ids.phone ? normPhone_(ans[ids.phone]) : '',
+    line: ids.line ? String(ans[ids.line] || '').trim().replace(/^@/, '') : '',
+    hospital: ids.hospital ? String(ans[ids.hospital] || '').trim() : '',
+    specialty: ids.specialty ? String(ans[ids.specialty] || '').trim() : '',
     email: String((typeof resp.getRespondentEmail === 'function' && resp.getRespondentEmail()) || ans[ids.email] || '').trim(),
     secret: ids.secret ? ans[ids.secret] : '',
     time: resp.getTimestamp()
@@ -528,6 +553,7 @@ function processResponse_(resp) {
   d.score = total ? score + '/' + total : 'สำรวจ';
 
   var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
+  ensureCodeCols_(sh);
   var n = Math.max(0, sh.getLastRow() - 1);
   var data = n ? sh.getRange(2, 1, n, CODE_HEADERS.length).getValues() : [];
 
@@ -546,6 +572,8 @@ function processResponse_(resp) {
       if (st !== ST_PASSED && st !== ST_REDEEMED) continue;
       if (d.license && normId_(data[j][C.LICENSE - 1]) === d.license) { reason = 'เลขใบประกอบวิชาชีพนี้ได้รับสิทธิ์แล้ว (บัตร ' + data[j][0] + ')'; break; }
       if (d.phone && normPhone_(data[j][C.PHONE - 1]) === d.phone) { reason = 'เบอร์โทรนี้ได้รับสิทธิ์แล้ว (บัตร ' + data[j][0] + ')'; break; }
+      if (d.line && normWord_(data[j][C.LINE - 1]) === normWord_(d.line)) { reason = 'LINE ID นี้ได้รับสิทธิ์แล้ว (บัตร ' + data[j][0] + ')'; break; }
+      if (d.email && normWord_(data[j][C.EMAIL - 1]) === normWord_(d.email)) { reason = 'อีเมลนี้ได้รับสิทธิ์แล้ว (บัตร ' + data[j][0] + ')'; break; }
     }
   }
   if (!reason && score < minScore) reason = 'ตอบถูก ' + score + ' จาก ' + total + ' ข้อ (ต้องถูกอย่างน้อย ' + minScore + ' ข้อ) – ตอบใหม่ได้';
@@ -559,14 +587,15 @@ function processResponse_(resp) {
     var r = rowIdx + 2;
     sh.getRange(r, C.SCORE).setNumberFormat('@');
     sh.getRange(r, C.STATUS, 1, 7).setValues([[ST_PASSED, d.name, d.license, d.phone, d.email, d.score, d.time]]);
-    log.appendRow([d.time, d.code, d.name, d.license, "'" + d.phone, 'ผ่าน', '', d.score, resp.getId()]);
+    sh.getRange(r, C.LINE, 1, 3).setValues([[d.line, d.hospital, d.specialty]]);
+    log.appendRow([d.time, d.code, d.name, d.license, "'" + d.phone, 'ผ่าน', '', d.score, resp.getId(), d.line, d.hospital, d.specialty]);
     var c2 = countStatus_();
     if (c2.passed + c2.redeemed >= s.PRIZE_LIMIT) {
       try { FormApp.openById(s.FORM_ID).setAcceptingResponses(false)
         .setCustomClosedFormMessage('ขออภัย ของที่ระลึกหมดแล้ว ขอบคุณที่ร่วมงาน'); } catch (err) {}
     }
   } else {
-    log.appendRow([d.time, d.code, d.name, d.license, "'" + d.phone, 'ไม่ผ่าน', reason, d.score, resp.getId()]);
+    log.appendRow([d.time, d.code, d.name, d.license, "'" + d.phone, 'ไม่ผ่าน', reason, d.score, resp.getId(), d.line, d.hospital, d.specialty]);
   }
   SpreadsheetApp.flush();
 
@@ -825,8 +854,15 @@ function ensureSchemaMenu() {
     ['THANKS_TEXT', 'ขอบคุณที่ร่วมกิจกรรมตอบคำถามกับ TRB Chemedica หวังว่าของที่ระลึกชิ้นนี้จะเป็นประโยชน์ และหวังว่าจะได้พบท่านอีกในงานครั้งต่อไป', 'ข้อความขอบคุณในอีเมล (ระบบจะเติมชื่อ/เวลารับของ/รหัสบัตรให้เอง)'],
     ['REDEEM_NOTE', 'รับของที่ระลึกได้ที่บูธ TRB ระหว่างเวลา 12:00–16:00 น. (ทยอยมาได้ตลอดช่วงเวลา ไม่ต้องรีบมารับพร้อมกัน)', 'ข้อความบอกสถานที่/เวลารับของ แสดงหลังส่งคำตอบสำเร็จ']
   ];
+  defaults.push(['ASK_PHONE', 'OPTIONAL', 'เบอร์มือถือ: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
+  defaults.push(['ASK_LINE', 'OPTIONAL', 'LINE ID: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
+  defaults.push(['ASK_HOSPITAL', 'TRUE', 'ชื่อโรงพยาบาล/สถานพยาบาล: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
+  defaults.push(['ASK_SPECIALTY', 'TRUE', 'Specialty (dropdown): TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
+  defaults.push(['SPECIALTY_LIST', DEFAULT_SPECIALTIES, 'รายการ Specialty ตามลำดับที่ต้องการ คั่นด้วย ;']);
   var added = [];
   defaults.forEach(function (d) { if (!have[d[0]]) { sh.appendRow(d); added.push(d[0]); } });
+  var lg = ss.getSheetByName(SH_LOG);
+  if (lg && !lg.getRange(1, 10).getValue()) lg.getRange(1, 10, 1, 3).setValues([['LINE ID', 'โรงพยาบาล', 'Specialty']]).setFontWeight('bold').setBackground('#1f4e79').setFontColor('#ffffff');
   sh.getRange('B2:B').setBackground('#fff8e1');
   ensureCodeCols_(ss.getSheetByName(SH_CODES));
   SpreadsheetApp.getUi().alert(added.length ? 'เพิ่มค่าตั้งค่า: ' + added.join(', ') + '\nตรวจ/แก้ค่าในชีต "ตั้งค่า" ได้เลย' : 'ค่าตั้งค่าและคอลัมน์ครบอยู่แล้ว');
