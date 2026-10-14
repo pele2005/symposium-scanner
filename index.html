@@ -78,9 +78,9 @@
   <div><label for="pin">PIN เจ้าหน้าที่</label><input id="pin" type="password" inputmode="numeric" autocomplete="off"></div>
   <div><label for="mode">วิธีอ่านบัตร</label>
     <select id="mode" onchange="modeHint()"><option value="cam">กล้องมือถือ/แท็บเล็ต</option><option value="hid">เครื่องสแกนบาร์โค้ด (DS2208/DS2278 ต่อ USB หรือ Bluetooth กับเครื่องนี้)</option></select></div>
-  <div><label for="lane">ช่องแลกของ (เครื่องนี้)</label>
-    <select id="lane"><option value="M1">มือถือ 1</option><option value="M2">มือถือ 2</option><option value="M3">มือถือ 3</option><option value="M4">มือถือ 4</option>
-      <option value="T1">เครื่องสแกน+แท็บเล็ต 1</option><option value="T2">เครื่องสแกน+แท็บเล็ต 2</option><option value="T3">เครื่องสแกน+แท็บเล็ต 3</option></select></div>
+  <div><label for="lane">Area ผู้แทน (ผู้ใช้เครื่องนี้)</label>
+    <select id="lane"><option value="">— เลือก Area —</option><optgroup label="OPH BKK"><option value="1BA">1BA</option><option value="1BB">1BB</option><option value="1BC">1BC</option><option value="1BD">1BD</option><option value="1BE">1BE</option><option value="1BF">1BF</option><option value="1BG">1BG</option><option value="1BH">1BH</option><option value="1BI">1BI</option><option value="1BJ">1BJ</option><option value="1BK">1BK</option><option value="1BL">1BL</option><option value="1BM">1BM</option><option value="1BN">1BN</option></optgroup><optgroup label="OPH UPC"><option value="1C">1C</option><option value="1CW">1CW</option><option value="1E">1E</option><option value="1LN">1LN</option><option value="1LNE">1LNE</option><option value="1LS">1LS</option><option value="1MNE">1MNE</option><option value="1MS">1MS</option><option value="1NE">1NE</option><option value="1NN">1NN</option><option value="1UN">1UN</option><option value="1UNE">1UNE</option><option value="1US">1US</option><option value="1WE">1WE</option><option value="1WS">1WS</option></optgroup><optgroup label="ORT"><option value="2BA">2BA</option><option value="2BB">2BB</option><option value="2BC">2BC</option><option value="2BD">2BD</option><option value="2BE">2BE</option><option value="2BG">2BG</option><option value="2BH">2BH</option><option value="2BJ">2BJ</option><option value="2BK">2BK</option><option value="2BL">2BL</option><option value="2C">2C</option><option value="2E">2E</option><option value="2LN">2LN</option><option value="2LNE">2LNE</option><option value="2LS">2LS</option><option value="2MNE">2MNE</option><option value="2UN">2UN</option><option value="2UNE">2UNE</option><option value="2US">2US</option><option value="2W">2W</option></optgroup><optgroup label="OTC"><option value="5BA">5BA</option><option value="5BB">5BB</option><option value="5BC">5BC</option><option value="5BD">5BD</option><option value="5BE">5BE</option><option value="5BW">5BW</option><option value="5C">5C</option><option value="5E">5E</option><option value="5N">5N</option><option value="5NE">5NE</option><option value="5S">5S</option></optgroup><optgroup label="อื่น ๆ"><option value="PM">PM</option><option value="ADMIN">ADMIN</option><option value="SM">SM</option><option value="NSM">NSM</option><option value="BOOTH">BOOTH</option></optgroup><option value="__other">อื่น ๆ (พิมพ์เอง)</option></select>
+    <input id="laneOther" placeholder="พิมพ์ชื่อ/Area เช่น 2BA-Nok" autocomplete="off" style="display:none;margin-top:8px"></div>
   <p id="modeHint" style="display:none">โหมดเครื่องสแกน: จับคู่เครื่องสแกนกับแท็บเล็ต/โน้ตบุ๊กเครื่องนี้ก่อน ตั้งคีย์บอร์ดระบบเป็นภาษาอังกฤษ (EN) · หน้านี้จะรับค่าจากเครื่องสแกนโดยตรง ไม่ต้องแตะจอ และคีย์บอร์ดบนจอจะไม่เด้ง</p>
   <div class="err" id="setupErr"></div>
   <button class="btn" id="startBtn" onclick="start()">เริ่มสแกน</button>
@@ -90,6 +90,7 @@
 <div class="screen" id="screen">
   <div class="top">
     <div class="ev" id="evName">TRB Symposium</div>
+    <div class="pill" id="lanePill">–</div>
     <div class="pill">รับแล้ว <b id="cRedeemed">–</b> / เหลือ <b id="cLeft">–</b></div>
     <button class="iconbtn" onclick="openSetup()">ตั้งค่า</button>
   </div>
@@ -135,22 +136,34 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <script>
   var DEFAULT_API = 'https://script.google.com/macros/s/AKfycbx-Lp7HZ-pC85wT38CYtdH5D9css-n0nSI7npU8N_Ixx96N4EA7T-7b6dUkAOnrfftJaw/exec';
-  var cfg = { api: DEFAULT_API, pin: '', lane: 'M1', mode: 'cam' };
+  var cfg = { api: DEFAULT_API, pin: '', lane: '', mode: 'cam' };
   try { var saved = JSON.parse(localStorage.getItem('scanCfg') || '{}'); if (saved.pin) cfg = saved; } catch (e) {}
   if (!cfg.api || /__API/.test(cfg.api)) cfg.api = DEFAULT_API;
   document.getElementById('api').value = cfg.api || '';
   document.getElementById('pin').value = cfg.pin || '';
-  document.getElementById('lane').value = cfg.lane || 'M1';
+  (function () {
+    var sel = document.getElementById('lane'), oth = document.getElementById('laneOther');
+    var known = Array.prototype.some.call(sel.options, function (o) { return o.value === cfg.lane; });
+    if (cfg.lane && !known) { sel.value = '__other'; oth.value = cfg.lane; oth.style.display = 'block'; } else sel.value = cfg.lane || '';
+    sel.addEventListener('change', function () { oth.style.display = sel.value === '__other' ? 'block' : 'none'; if (sel.value === '__other') oth.focus(); });
+  })();
   document.getElementById('mode').value = cfg.mode || 'cam';
   function modeHint() { document.getElementById('modeHint').style.display = document.getElementById('mode').value === 'hid' ? 'block' : 'none'; }
   modeHint();
 
   // เรียก Apps Script แบบไม่แนบคุกกี้ (fetch) ถ้าเบราว์เซอร์ไม่ยอมให้ข้ามโดเมน ใช้ JSONP สำรอง
+  // ส่งคำขอพร้อมหมดเวลา 10 วินาที ถ้าค้างจะยกเลิกแล้วส่งใหม่อัตโนมัติ 1 ครั้ง (redeem ใช้ rid เดิม จึงไม่ตัดสิทธิ์ซ้ำ)
+  function fetchT(url, ms) {
+    var ctl = ('AbortController' in window) ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctl) ctl.abort(); }, ms);
+    return fetch(url, { method: 'GET', redirect: 'follow', credentials: 'omit', cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+      .then(function (r) { clearTimeout(t); return r.json(); }, function (e) { clearTimeout(t); throw e; });
+  }
   function api(P) {
     var base = (cfg.api || '').split('?')[0];
     var qs = Object.keys(P).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(P[k]); }).join('&');
-    return fetch(base + '?' + qs, { method: 'GET', redirect: 'follow', credentials: 'omit', cache: 'no-store' })
-      .then(function (r) { return r.json(); })
+    return fetchT(base + '?' + qs, 10000)
+      .catch(function () { showRetry(); return fetchT(base + '?' + qs, 12000); })
       .catch(function () {
         return new Promise(function (resolve, reject) {
           var cb = 'cb' + Date.now() + Math.floor(Math.random() * 1e6);
@@ -165,6 +178,8 @@
       });
   }
 
+  function showRetry() { var b = document.getElementById('rBig'); if (busy && b) b.textContent = 'สัญญาณช้า กำลังลองใหม่…'; }
+  function newRid() { return cfg.lane + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7); }
   var video = document.getElementById('video'), stream = null, scanning = false, busy = false;
   var lastCode = '', lastAt = 0, detector = null, canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
   var audioCtx = null, resultTimer = null, clockTimer = null;
@@ -175,10 +190,12 @@
     cfg.api = document.getElementById('api').value.trim();
     cfg.pin = document.getElementById('pin').value.trim();
     cfg.lane = document.getElementById('lane').value;
+    if (cfg.lane === '__other') cfg.lane = document.getElementById('laneOther').value.trim().replace(/\s+/g, ' ').slice(0, 20);
     cfg.mode = document.getElementById('mode').value;
     var err = document.getElementById('setupErr');
     if (!/^https:\/\/script\.google\.com\/macros\//.test(cfg.api)) { err.textContent = 'ที่อยู่ระบบไม่ถูกต้อง (ต้องขึ้นต้นด้วย https://script.google.com/macros/)'; return; }
     if (!cfg.pin) { err.textContent = 'กรุณาใส่ PIN'; return; }
+    if (!cfg.lane) { err.textContent = 'กรุณาเลือก Area ผู้แทน'; return; }
     err.textContent = 'กำลังตรวจ PIN…';
     document.getElementById('startBtn').disabled = true;
     api({ action: 'ping', pin: cfg.pin }).then(function (r) {
@@ -187,6 +204,7 @@
       if (r.event) document.getElementById('evName').textContent = r.event;
       try { localStorage.setItem('scanCfg', JSON.stringify(cfg)); } catch (e) {}
       updateCounts(r);
+      document.getElementById('lanePill').textContent = cfg.lane;
       err.textContent = '';
       document.getElementById('setup').classList.remove('show');
       try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
@@ -263,7 +281,7 @@
   function redeem(code) {
     busy = true;
     showResult('busy', 'กำลังตรวจ…', '', code, '');
-    api({ action: 'redeem', code: code, pin: cfg.pin, lane: cfg.lane }).then(function (r) {
+    api({ action: 'redeem', code: code, pin: cfg.pin, lane: cfg.lane, rid: newRid() }).then(function (r) {
       busy = false;
       if (!r) { showResult('warn', 'ไม่มีการตอบกลับ', '', code, 'ลองอีกครั้ง'); return; }
       if (r.error) { showResult('warn', r.error, '', code, ''); beep(false); return; }
@@ -334,7 +352,7 @@
     var name = document.getElementById('forceName').value.trim(), note = document.getElementById('forceNote').value.trim();
     busy = true;
     showResult('busy', 'กำลังบันทึกปล่อยผ่าน…', name, code, '');
-    api({ action: 'redeem', code: code, pin: cfg.pin, lane: cfg.lane, force: '1', name: name, note: note }).then(function (r) {
+    api({ action: 'redeem', code: code, pin: cfg.pin, lane: cfg.lane, force: '1', name: name, note: note, rid: newRid() }).then(function (r) {
       busy = false;
       if (!r || r.error) { showResult('warn', (r && r.error) || 'ไม่มีการตอบกลับ', '', code, 'ลองอีกครั้ง'); beep(false); return; }
       if (r.state === 'forced_now' || r.state === 'redeemed_now') { showResult('ok', '✅ ปล่อยผ่าน – มอบของได้', r.name || name, r.code, 'บันทึกเวลา/ช่อง ' + cfg.lane + ' แล้ว' + (note ? ' · ' + note : '')); beep(true); bump(); }
