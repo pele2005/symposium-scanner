@@ -310,24 +310,24 @@ function createForm() {
   ids.code = codeItem.getId();
   ids.name = form.addTextItem().setTitle('ชื่อ-นามสกุล').setRequired(true).getId();
   if (s.ASK_HOSPITAL) {
-    ids.hospital = form.addTextItem().setTitle('โรงพยาบาล / สถานพยาบาล' + (s.HOSPITAL_REQUIRED ? '' : ' (ไม่บังคับ)')).setRequired(s.HOSPITAL_REQUIRED).getId();
+    ids.hospital = form.addTextItem().setTitle('โรงพยาบาล / สถานพยาบาล').setRequired(s.HOSPITAL_REQUIRED).getId();
   }
   if (s.ASK_SPECIALTY) {
-    ids.specialty = form.addListItem().setTitle('Specialty' + (s.SPECIALTY_REQUIRED ? '' : ' (ไม่บังคับ)')).setChoiceValues(s.SPECIALTY_LIST).setRequired(s.SPECIALTY_REQUIRED).getId();
+    ids.specialty = form.addListItem().setTitle('Specialty').setChoiceValues(s.SPECIALTY_LIST).setRequired(s.SPECIALTY_REQUIRED).getId();
   }
   if (s.ASK_LICENSE) {
-    ids.license = form.addTextItem().setTitle('เลขใบประกอบวิชาชีพ' + (s.LICENSE_REQUIRED ? '' : ' (ไม่บังคับ)'))
-      .setHelpText(s.LICENSE_REQUIRED ? 'ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น' : 'กรอกได้ถ้าสะดวก – ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น')
+    ids.license = form.addTextItem().setTitle('เลขใบประกอบวิชาชีพ')
+      .setHelpText(s.LICENSE_REQUIRED ? 'ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น' : 'ใช้ยืนยันสิทธิ์ 1 ท่าน / 1 ชิ้น')
       .setRequired(s.LICENSE_REQUIRED).getId();
   }
   if (s.ASK_PHONE) {
-    var phoneItem = form.addTextItem().setTitle('เบอร์โทรศัพท์มือถือ' + (s.PHONE_REQUIRED ? '' : ' (ไม่บังคับ)')).setRequired(s.PHONE_REQUIRED);
+    var phoneItem = form.addTextItem().setTitle('เบอร์โทรศัพท์มือถือ').setRequired(s.PHONE_REQUIRED);
     phoneItem.setValidation(FormApp.createTextValidation().requireTextMatchesPattern('^0[0-9\\- ]{8,11}$')
       .setHelpText('กรุณากรอกเบอร์มือถือ 10 หลัก เช่น 0812345678').build());
     ids.phone = phoneItem.getId();
   }
   if (s.ASK_LINE) {
-    ids.line = form.addTextItem().setTitle('LINE ID' + (s.LINE_REQUIRED ? '' : ' (ไม่บังคับ)')).setRequired(s.LINE_REQUIRED).getId();
+    ids.line = form.addTextItem().setTitle('LINE ID').setRequired(s.LINE_REQUIRED).getId();
   }
   // อีเมล: ใช้ช่องอีเมลของ Google Form เอง (ผู้ตอบพิมพ์เอง) เพื่อให้ฟอร์ม "ส่งสำเนาคำตอบ" ให้ผู้ตอบได้โดยไม่ติดโควตาอีเมลของบัญชี
   try {
