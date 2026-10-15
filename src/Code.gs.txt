@@ -49,6 +49,11 @@ function onOpen() {
     .addItem('ปิดส่งอีเมลขอบคุณอัตโนมัติ', 'removeThanksTrigger')
     .addItem('เพิ่มค่าตั้งค่า/คอลัมน์ที่ขาด (หลังอัปเดตโค้ด)', 'ensureSchemaMenu')
     .addSeparator()
+    .addItem('ตั้งค่าตามทีม (TEAM: ORT / OPH / OTC)', 'applyTeamPresetMenu')
+    .addItem('ลิงก์ + QR หน้าสแกนสำหรับเจ้าหน้าที่', 'showStaffLink')
+    .addItem('ล้างบัตรทดสอบ (รหัสขึ้นต้น TEST_PREFIX)', 'resetTestCards')
+    .addItem('⚠ เตรียมเป็นต้นแบบงานใหม่ (ล้างข้อมูลทั้งหมด)', 'prepareTemplate')
+    .addSeparator()
     .addItem('ตรวจคำตอบที่ตกหล่น', 'sweepMissedMenu')
     .addItem('อัปเดตข้อความในฟอร์ม (ชื่องาน/ข้อความยืนยัน)', 'refreshFormText')
     .addItem('เปิดรับคำตอบ', 'openForm')
@@ -66,6 +71,10 @@ function initSheets() {
     var rows = [
       ['KEY', 'ค่า', 'คำอธิบาย'],
       ['EVENT_NAME', 'TRB Symposium 2026', 'ชื่องาน (แสดงบนฟอร์มและหน้าสถานะ)'],
+      ['TEAM', 'ORT', 'ทีมที่จัดงาน ORT / OPH / OTC – แล้วเลือกเมนู "ตั้งค่าตามทีม" เพื่อเติม Specialty / Area / ชื่อช่องให้อัตโนมัติ'],
+      ['LANE_LIST', '', 'รายชื่อช่องแลกของในหน้าสแกน รูปแบบ  กลุ่ม=A,B,C | กลุ่ม2=X,Y  (เว้นว่าง = ใช้ค่าตามทีม)'],
+      ['API_URL', '', 'URL ระบบ (Web app …/exec) หลัง Deploy – ใช้สร้างลิงก์/QR หน้าสแกนให้เจ้าหน้าที่'],
+      ['TEST_PREFIX', 'T', 'ตัวอักษรนำหน้ารหัสบัตรทดสอบ (เมนูล้างบัตรทดสอบจะล้างเฉพาะรหัสที่ขึ้นต้นด้วยตัวนี้)'],
       ['PRIZE_LIMIT', 300, 'จำนวนของที่ระลึกทั้งหมด – ครบแล้วปิดฟอร์มอัตโนมัติ'],
       ['CODE_COUNT', 300, 'จำนวนบัตร/รหัสที่จะสร้าง (ปกติเท่ากับจำนวนของ)'],
       ['CODE_PREFIX', 'S', 'ตัวอักษรนำหน้ารหัส เช่น S → S057-K7QX'],
@@ -203,6 +212,10 @@ function getSettings_() {
   var ho = ask3_(s.ASK_HOSPITAL, 'FALSE'); s.ASK_HOSPITAL = ho.ask; s.HOSPITAL_REQUIRED = ho.req;
   var sp = ask3_(s.ASK_SPECIALTY, 'FALSE'); s.ASK_SPECIALTY = sp.ask; s.SPECIALTY_REQUIRED = sp.req;
   s.HOSPITAL_LABEL = String(s.HOSPITAL_LABEL || 'โรงพยาบาล / สถานพยาบาล').trim();
+  s.TEAM = String(s.TEAM || '').trim().toUpperCase();
+  s.API_URL = String(s.API_URL || '').trim();
+  s.TEST_PREFIX = String(s.TEST_PREFIX || 'T').trim().toUpperCase();
+  s.LANES = parseLanes_(String(s.LANE_LIST || '').trim() || ((TEAM_PRESETS[s.TEAM] || {}).LANE_LIST || ''));
   s.SPECIALTY_LIST = String(s.SPECIALTY_LIST || DEFAULT_SPECIALTIES).split(';').map(function (x) { return x.trim(); }).filter(String);
   s.START_TIME = toDate_(s.START_TIME);
   s.END_TIME = toDate_(s.END_TIME);
@@ -663,7 +676,7 @@ function apiCore_(P) {
       out = { ok: false, error: 'PIN ไม่ถูกต้อง' };
     } else if (P.action === 'ping') {
       var cnt = countStatus_();
-      out = { ok: true, event: s.EVENT_NAME, passed: cnt.passed, redeemed: cnt.redeemed, limit: s.PRIZE_LIMIT };
+      out = { ok: true, event: s.EVENT_NAME, team: s.TEAM, lanes: s.LANES, passed: cnt.passed, redeemed: cnt.redeemed, limit: s.PRIZE_LIMIT };
     } else {
       var code = extractCode_(P.code || '');
       if (!code) out = { ok: false, error: 'ไม่พบรหัสบัตรใน QR' };
@@ -871,6 +884,10 @@ function ensureSchemaMenu() {
   defaults.push(['ASK_PHONE', 'OPTIONAL', 'เบอร์มือถือ: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
   defaults.push(['ASK_LINE', 'OPTIONAL', 'LINE ID: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
   defaults.push(['ASK_HOSPITAL', 'TRUE', 'ชื่อโรงพยาบาล/สถานพยาบาล: TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
+  defaults.push(['TEAM', 'ORT', 'ทีมที่จัดงาน ORT / OPH / OTC – แล้วเลือกเมนู "ตั้งค่าตามทีม"']);
+  defaults.push(['LANE_LIST', '', 'รายชื่อช่องแลกของในหน้าสแกน รูปแบบ  กลุ่ม=A,B,C | กลุ่ม2=X,Y  (เว้นว่าง = ใช้ค่าตามทีม)']);
+  defaults.push(['API_URL', '', 'URL ระบบ (Web app …/exec) หลัง Deploy – ใช้สร้างลิงก์/QR หน้าสแกนให้เจ้าหน้าที่']);
+  defaults.push(['TEST_PREFIX', 'T', 'ตัวอักษรนำหน้ารหัสบัตรทดสอบ']);
   defaults.push(['HOSPITAL_LABEL', 'โรงพยาบาล / สถานพยาบาล', 'ชื่อช่องสถานที่ทำงานในฟอร์ม (OTC ใช้ "ร้านยา / สถานที่ทำงาน")']);
   defaults.push(['ASK_SPECIALTY', 'TRUE', 'Specialty (dropdown): TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
   defaults.push(['SPECIALTY_LIST', DEFAULT_SPECIALTIES, 'รายการ Specialty ตามลำดับที่ต้องการ คั่นด้วย ;']);
@@ -1065,4 +1082,164 @@ function refreshFormText() {
     .setDescription('ตอบคำถามให้ครบ แล้วนำ "บัตร QR" มาแลกของที่ระลึกที่จุดบริการ\nสิทธิ์ 1 ท่าน / 1 ชิ้น สำหรับผู้เข้าร่วมประชุมเท่านั้น')
     .setConfirmationMessage(confirmMsg_(s));
   SpreadsheetApp.getUi().alert('อัปเดตข้อความในฟอร์มเรียบร้อย');
+}
+
+
+// =====================================================================
+// ค่าตั้งต้นตามทีม + ลิงก์หน้าสแกน + ล้างบัตรทดสอบ + เตรียมต้นแบบงานใหม่
+// =====================================================================
+var SCANNER_PAGE = 'https://pele2005.github.io/symposium-scanner/';
+
+var TEAM_PRESETS = {
+  ORT: {
+    SPECIALTY_LIST: 'General;Hip & Knee;Spine;Sport;MBOG;Pediatric;Foot & Ankle;Hand;Rehab;Rheumatology;Trauma;Tumor;Other',
+    ASK_SPECIALTY: 'TRUE', HOSPITAL_LABEL: 'โรงพยาบาล / สถานพยาบาล', ASK_HOSPITAL: 'TRUE', ASK_LICENSE: 'FALSE',
+    LANE_LIST: 'ORT=2BA,2BB,2BC,2BD,2BE,2BG,2BH,2BJ,2BK,2BL,2C,2E,2LN,2LNE,2LS,2MNE,2UN,2UNE,2US,2W | ทีมงานอื่น=ORT-NSM,ORT-PM,ORT-SM-B1,ORT-SM-B2,ORT-SM-U1,ORT-SM-U2'
+  },
+  OPH: {
+    SPECIALTY_LIST: 'General;Cornea;Glaucoma;Retina;Oculo;Neuro Oph;Pediatric;Uveitis;Other',
+    ASK_SPECIALTY: 'TRUE', HOSPITAL_LABEL: 'โรงพยาบาล / สถานพยาบาล', ASK_HOSPITAL: 'TRUE', ASK_LICENSE: 'FALSE',
+    LANE_LIST: 'OPH BKK=1BA,1BB,1BC,1BD,1BE,1BF,1BG,1BH,1BI,1BJ,1BK,1BL,1BM,1BN | OPH UPC=1C,1CW,1E,1LN,1LNE,1LS,1MNE,1MS,1NE,1NN,1UN,1UNE,1US,1WE,1WS | ทีมงานอื่น=OPH-NSM-B,OPH-NSM-U,OPH-PM,OPH-SM-B1,OPH-SM-B2,OPH-SM-B3,OPH-SM-U1,OPH-SM-U2,OPH-SM-U3'
+  },
+  OTC: {
+    SPECIALTY_LIST: '', ASK_SPECIALTY: 'FALSE', HOSPITAL_LABEL: 'ร้านยา / สถานที่ทำงาน', ASK_HOSPITAL: 'TRUE', ASK_LICENSE: 'FALSE',
+    LANE_LIST: 'OTC=5BA,5BB,5BC,5BD,5BE,5BW,5C,5E,5N,5NE,5S | ทีมงานอื่น=OTC-NSM,OTC-PM,OTC-SM-1,OTC-SM-2'
+  }
+};
+
+/** "กลุ่ม=A,B | กลุ่ม2=X" → [{label:'กลุ่ม', items:['A','B']}, ...] */
+function parseLanes_(txt) {
+  if (!txt) return [];
+  return String(txt).split('|').map(function (g) {
+    var i = g.indexOf('='), label = i >= 0 ? g.slice(0, i).trim() : 'ช่องแลกของ';
+    var items = (i >= 0 ? g.slice(i + 1) : g).split(/[,;]/).map(function (x) { return x.trim(); }).filter(String);
+    return { label: label, items: items };
+  }).filter(function (g) { return g.items.length; });
+}
+
+function applyTeamPresetMenu() {
+  var ui = SpreadsheetApp.getUi(), s = getSettings_();
+  var p = TEAM_PRESETS[s.TEAM];
+  if (!p) { ui.alert('ค่า TEAM ในชีต "ตั้งค่า" ต้องเป็น ORT, OPH หรือ OTC (ตอนนี้: "' + s.TEAM + '")'); return; }
+  var ok = ui.alert('ตั้งค่าตามทีม ' + s.TEAM, 'จะเขียนทับค่าเหล่านี้ในชีต "ตั้งค่า":\nSPECIALTY_LIST, ASK_SPECIALTY, HOSPITAL_LABEL, ASK_HOSPITAL, ASK_LICENSE, LANE_LIST\n\nดำเนินการต่อ?', ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+  Object.keys(p).forEach(function (k) { setSetting_(k, p[k]); });
+  ui.alert('ตั้งค่าตามทีม ' + s.TEAM + ' เรียบร้อย ✅\n\nขั้นต่อไป: ตรวจ/แก้รายชื่อใน LANE_LIST ได้ตามต้องการ แล้วเลือกเมนู 2) สร้าง Google Form');
+}
+
+/** หน้าต่างแสดงลิงก์ + QR สำหรับให้เจ้าหน้าที่เปิดหน้าสแกนที่ผูกกับงานนี้ */
+function showStaffLink() {
+  var s = getSettings_(), api = s.API_URL;
+  if (!api) { try { api = ScriptApp.getService().getUrl() || ''; } catch (e) {} }
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/.test(api)) {
+    SpreadsheetApp.getUi().alert('ยังไม่มี URL ระบบ\n\n1) Deploy → Manage deployments → คัดลอก Web app URL (ลงท้าย /exec)\n2) วางในชีต "ตั้งค่า" แถว API_URL\n3) เลือกเมนูนี้อีกครั้ง');
+    return;
+  }
+  var link = SCANNER_PAGE + '?api=' + encodeURIComponent(api);
+  var h = '<div style="font-family:Sarabun,Arial,sans-serif;text-align:center">' +
+    '<div style="font-size:15px;font-weight:700;color:#1c4f9d">' + escHtml_(s.EVENT_NAME) + (s.TEAM ? ' · ' + escHtml_(s.TEAM) : '') + '</div>' +
+    '<div id="q" style="margin:12px auto;width:240px;height:240px"></div>' +
+    '<div style="font-size:13px;color:#444">ให้เจ้าหน้าที่สแกน QR นี้ด้วยมือถือ แล้วใส่ PIN + เลือก Area</div>' +
+    '<textarea readonly style="width:100%;height:64px;margin-top:10px;font-size:11px">' + escHtml_(link) + '</textarea>' +
+    '<div style="font-size:12px;color:#888;margin-top:6px">PIN ไม่ได้อยู่ในลิงก์ – แจ้งเจ้าหน้าที่แยกต่างหาก</div></div>' +
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>' +
+    '<script>var q=qrcode(0,"M");q.addData(' + JSON.stringify(link) + ');q.make();document.getElementById("q").innerHTML=q.createSvgTag({cellSize:5,margin:2,scalable:true});</script>';
+  SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput(h).setWidth(360).setHeight(470), 'ลิงก์หน้าสแกนสำหรับเจ้าหน้าที่');
+}
+function escHtml_(t) { return String(t || '').replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+/** หาแท็บคำตอบที่ผูกกับฟอร์มปัจจุบัน */
+function responsesSheet_(formId) {
+  if (!formId) return null;
+  var shs = SpreadsheetApp.getActive().getSheets();
+  for (var i = 0; i < shs.length; i++) {
+    var u = ''; try { u = shs[i].getFormUrl() || ''; } catch (e) {}
+    if (u && u.indexOf(formId) >= 0) return shs[i];
+  }
+  return null;
+}
+
+/** ล้างบัตรทดสอบ: สถานะกลับเป็น "ว่าง", ลบประวัติในชีตบันทึก, ลบคำตอบในฟอร์มและแท็บคำตอบ */
+function resetTestCards() {
+  var ui = SpreadsheetApp.getUi(), s = getSettings_(), px = s.TEST_PREFIX;
+  if (!px || px === s.CODE_PREFIX) { ui.alert('TEST_PREFIX ต้องไม่ว่างและต้องไม่ซ้ำกับ CODE_PREFIX (ตอนนี้ TEST_PREFIX = "' + px + '", CODE_PREFIX = "' + s.CODE_PREFIX + '")'); return; }
+  var re = new RegExp('^' + px.replace(/[^A-Z0-9]/g, '') + '\\d');
+  var isTest = function (v) { return re.test(normCode_(v)); };
+  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(SH_CODES);
+  var n = Math.max(0, sh.getLastRow() - 1);
+  var codes = n ? sh.getRange(2, 1, n, 1).getValues() : [];
+  var rows = []; codes.forEach(function (r, i) { if (isTest(r[0])) rows.push(i + 2); });
+  if (!rows.length) { ui.alert('ไม่พบบัตรทดสอบที่ขึ้นต้นด้วย "' + px + '"'); return; }
+  var ok = ui.alert('ล้างบัตรทดสอบ', 'พบบัตรทดสอบ ' + rows.length + ' ใบ (' + codes[rows[0] - 2][0] + ' … ' + codes[rows[rows.length - 1] - 2][0] + ')\n\n' +
+    'จะล้าง: สถานะ/ชื่อ/เวลา ในชีต "รหัส", ประวัติในชีต "บันทึก", คำตอบของบัตรเหล่านี้ในฟอร์มและแท็บคำตอบ\nบัตรจริงไม่ถูกแตะต้อง\n\nดำเนินการต่อ?', ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  var nForm = 0, nLog = 0, nResp = 0;
+  try {
+    var W = CODE_HEADERS.length;
+    rows.forEach(function (r) {
+      sh.getRange(r, C.STATUS).setValue(ST_EMPTY);
+      sh.getRange(r, C.NAME, 1, C.REDEEMED_AT - C.NAME + 1).clearContent();
+      sh.getRange(r, C.NOTE, 1, W - C.NOTE + 1).clearContent().setBackground(null);
+    });
+    var log = ss.getSheetByName(SH_LOG);
+    if (log && log.getLastRow() > 1) {
+      var lv = log.getRange(2, 2, log.getLastRow() - 1, 1).getValues();
+      for (var i = lv.length - 1; i >= 0; i--) if (isTest(lv[i][0])) { log.deleteRow(i + 2); nLog++; }
+    }
+    if (s.FORM_ID) {
+      var ids = JSON.parse(PropertiesService.getScriptProperties().getProperty('ITEM_IDS') || '{}');
+      try {
+        var form = FormApp.openById(s.FORM_ID);
+        form.getResponses().forEach(function (resp) {
+          var hit = resp.getItemResponses().some(function (ir) { return ir.getItem().getId() === ids.code && isTest(ir.getResponse()); });
+          if (hit) { form.deleteResponse(resp.getId()); nForm++; }
+        });
+      } catch (e) { console.error(e); }
+      var rs = responsesSheet_(s.FORM_ID);
+      if (rs && rs.getLastRow() > 1) {
+        var head = rs.getRange(1, 1, 1, rs.getLastColumn()).getValues()[0], col = head.indexOf('รหัสบัตร') + 1;
+        if (col > 0) {
+          var rv = rs.getRange(2, col, rs.getLastRow() - 1, 1).getValues();
+          for (var j = rv.length - 1; j >= 0; j--) if (isTest(rv[j][0])) { rs.deleteRow(j + 2); nResp++; }
+        }
+      }
+    }
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
+  ui.alert('ล้างบัตรทดสอบเรียบร้อย ✅\n\nบัตร: ' + rows.length + ' ใบ กลับเป็น "ว่าง"\nชีตบันทึก: ลบ ' + nLog + ' แถว\nคำตอบในฟอร์ม: ลบ ' + nForm + ' รายการ\nแท็บคำตอบ: ลบ ' + nResp + ' แถว');
+}
+
+/** ใช้ในไฟล์ที่ "ทำสำเนา" มาเพื่อเปิดงานใหม่: ล้างข้อมูลคน/บัตร/ฟอร์มเดิมทั้งหมด เหลือแค่ค่าตั้งค่าและคำถาม */
+function prepareTemplate() {
+  var ui = SpreadsheetApp.getUi(), ss = SpreadsheetApp.getActive();
+  var r = ui.prompt('⚠ เตรียมเป็นต้นแบบงานใหม่',
+    'ใช้กับไฟล์ที่ทำสำเนา (File → Make a copy) มาเพื่อเปิดงานใหม่เท่านั้น!\n' +
+    'จะลบ: รหัสบัตรทั้งหมด, ชีตบันทึก, แท็บคำตอบ, การผูกฟอร์มเดิม, ตัวตั้งเวลาอัตโนมัติ\nจะเก็บไว้: ชีตตั้งค่า, ชีตคำถาม\n\n' +
+    'ไฟล์นี้คือ: "' + ss.getName() + '"\n\nพิมพ์คำว่า  ล้างทั้งหมด  เพื่อยืนยัน', ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK || r.getResponseText().trim() !== 'ล้างทั้งหมด') { ui.alert('ยกเลิกแล้ว ไม่มีอะไรถูกลบ'); return; }
+
+  ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ss.getSheets().forEach(function (sh) {
+    var u = ''; try { u = sh.getFormUrl() || ''; } catch (e) {}
+    if (!u) return;
+    try { FormApp.openByUrl(u).removeDestination(); } catch (e) { console.error(e); }
+    try { if (ss.getSheets().length > 1) ss.deleteSheet(sh); } catch (e) { console.error(e); }
+  });
+  var codes = ss.getSheetByName(SH_CODES);
+  if (codes && codes.getLastRow() > 1) codes.deleteRows(2, codes.getLastRow() - 1);
+  var log = ss.getSheetByName(SH_LOG);
+  if (log && log.getLastRow() > 1) log.deleteRows(2, log.getLastRow() - 1);
+  ss.getSheets().forEach(function (sh) {
+    if (sh.getName().indexOf(SH_SCAN) === 0 && sh.getLastRow() > SCAN_HIST_HEAD) sh.deleteRows(SCAN_HIST_HEAD + 1, sh.getLastRow() - SCAN_HIST_HEAD);
+  });
+  ['FORM_ID', 'FORM_URL', 'API_URL', 'WEBAPP_URL'].forEach(function (k) { setSetting_(k, ''); });
+  var props = PropertiesService.getScriptProperties();
+  ['ITEM_IDS', 'PREFILL_TEMPLATE'].forEach(function (k) { props.deleteProperty(k); });
+  ui.alert('ล้างข้อมูลเรียบร้อย ✅ ไฟล์นี้พร้อมเป็นงานใหม่\n\n' +
+    '1) แก้ชีต "ตั้งค่า": EVENT_NAME, TEAM, PRIZE_LIMIT, CODE_COUNT, STAFF_PIN ใหม่\n' +
+    '2) เมนู "ตั้งค่าตามทีม"\n3) แก้ชีต "คำถาม"\n4) เมนู 2) สร้างฟอร์ม → 3) สร้างรหัส → 4) สร้างลิงก์บัตร\n' +
+    '5) Deploy → New deployment (Web app) → วาง URL ในแถว API_URL → เมนู "ลิงก์ + QR หน้าสแกน"\n\n' +
+    'หมายเหตุ: ฟอร์มสำเนาที่ Google สร้างให้ตอนทำสำเนาไฟล์ ไม่ได้ใช้แล้ว ลบทิ้งจาก Drive ได้');
 }
