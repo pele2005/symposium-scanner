@@ -79,8 +79,8 @@
   <div><label for="mode">วิธีอ่านบัตร</label>
     <select id="mode" onchange="modeHint()"><option value="cam">กล้องมือถือ/แท็บเล็ต</option><option value="hid">เครื่องสแกนบาร์โค้ด (DS2208/DS2278 ต่อ USB หรือ Bluetooth กับเครื่องนี้)</option></select></div>
   <div><label for="lane">Area ผู้แทน (ผู้ใช้เครื่องนี้)</label>
-    <select id="lane"><option value="">— เลือก Area —</option><optgroup label="ORT"><option value="2BA">2BA</option><option value="2BB">2BB</option><option value="2BC">2BC</option><option value="2BD">2BD</option><option value="2BE">2BE</option><option value="2BG">2BG</option><option value="2BH">2BH</option><option value="2BJ">2BJ</option><option value="2BK">2BK</option><option value="2BL">2BL</option><option value="2C">2C</option><option value="2E">2E</option><option value="2LN">2LN</option><option value="2LNE">2LNE</option><option value="2LS">2LS</option><option value="2MNE">2MNE</option><option value="2UN">2UN</option><option value="2UNE">2UNE</option><option value="2US">2US</option><option value="2W">2W</option></optgroup><optgroup label="ทีมงานอื่น"><option value="ORT-NSM">ORT-NSM</option><option value="ORT-PM">ORT-PM</option><option value="ORT-SM-B1">ORT-SM-B1</option><option value="ORT-SM-B2">ORT-SM-B2</option><option value="ORT-SM-U1">ORT-SM-U1</option><option value="ORT-SM-U2">ORT-SM-U2</option></optgroup><option value="__other">อื่น ๆ (พิมพ์เอง)</option></select>
-    <input id="laneOther" placeholder="พิมพ์ชื่อ/Area เช่น 2BA-Nok" autocomplete="off" style="display:none;margin-top:8px"></div>
+    <select id="lane"><option value="">— เลือก Area —</option><optgroup label="ORT"><option value="2BA">2BA</option><option value="2BB">2BB</option><option value="2BC">2BC</option><option value="2BD">2BD</option><option value="2BE">2BE</option><option value="2BG">2BG</option><option value="2BH">2BH</option><option value="2BJ">2BJ</option><option value="2BK">2BK</option><option value="2BL">2BL</option><option value="2C">2C</option><option value="2E">2E</option><option value="2LN">2LN</option><option value="2LNE">2LNE</option><option value="2LS">2LS</option><option value="2MNE">2MNE</option><option value="2UN">2UN</option><option value="2UNE">2UNE</option><option value="2US">2US</option><option value="2W">2W</option></optgroup><option value="__other">ตำแหน่งอื่น (NSM / SM / PM ฯลฯ) – พิมพ์ชื่อ</option></select>
+    <input id="laneOther" placeholder="พิมพ์ตำแหน่ง + ชื่อ เช่น SM-Tanapon, NSM-Wuttipong, PM-Vimolphun" autocomplete="off" style="display:none;margin-top:8px"></div>
   <p id="modeHint" style="display:none">โหมดเครื่องสแกน: จับคู่เครื่องสแกนกับแท็บเล็ต/โน้ตบุ๊กเครื่องนี้ก่อน ตั้งคีย์บอร์ดระบบเป็นภาษาอังกฤษ (EN) · หน้านี้จะรับค่าจากเครื่องสแกนโดยตรง ไม่ต้องแตะจอ และคีย์บอร์ดบนจอจะไม่เด้ง</p>
   <div class="err" id="setupErr"></div>
   <button class="btn" id="startBtn" onclick="start()">เริ่มสแกน</button>
@@ -160,7 +160,7 @@
       groups.forEach(function (g) {
         h += '<optgroup label="' + esc(g.label) + '">' + g.items.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('') + '</optgroup>';
       });
-      sel.innerHTML = h + '<option value="__other">อื่น ๆ (พิมพ์เอง)</option>';
+      sel.innerHTML = h + '<option value="__other">ตำแหน่งอื่น (NSM / SM / PM ฯลฯ) – พิมพ์ชื่อ</option>';
     }
     selectLane(cfg.lane);
   }
@@ -217,7 +217,7 @@
     cfg.api = document.getElementById('api').value.trim();
     cfg.pin = document.getElementById('pin').value.trim();
     cfg.lane = document.getElementById('lane').value;
-    if (cfg.lane === '__other') cfg.lane = document.getElementById('laneOther').value.trim().replace(/\s+/g, ' ').slice(0, 20);
+    if (cfg.lane === '__other') cfg.lane = document.getElementById('laneOther').value.trim().replace(/\s+/g, ' ').slice(0, 30);
     cfg.mode = document.getElementById('mode').value;
     var err = document.getElementById('setupErr');
     if (!/^https:\/\/script\.google\.com\/macros\//.test(cfg.api)) { err.textContent = 'ที่อยู่ระบบไม่ถูกต้อง (ต้องขึ้นต้นด้วย https://script.google.com/macros/)'; return; }
@@ -437,7 +437,7 @@
     var color = (state === 'redeemed_now' || state === 'forced_now') ? 'var(--ok)' : (state === 'notpassed' ? 'var(--warn)' : 'var(--bad)');
     var t = new Date(); var ts = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2);
     hist.unshift({ color: color, code: code, name: name || '', ts: ts, state: state });
-    hist = hist.slice(0, 20);
+    hist = hist.slice(0, 30);
     document.getElementById('hist').innerHTML = hist.map(function (h) {
       return '<div><span class="dot" style="background:' + h.color + '"></span><span>' + h.ts + '</span><span class="code">' + esc(h.code) + '</span><span>' +
         esc(h.state === 'redeemed_now' ? 'มอบแล้ว' : h.state === 'forced_now' ? 'ปล่อยผ่าน' : h.state === 'already' ? 'รับไปแล้ว' : h.state === 'notfound' ? 'ไม่พบ' : 'ยังไม่ผ่าน') + '</span><span>' + esc(h.name) + '</span></div>';
