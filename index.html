@@ -72,7 +72,7 @@
 <body>
 
 <div class="setup show" id="setup">
-  <h1>สแกนบัตรรับของที่ระลึก</h1>
+  <h1 id="setupTitle">สแกนบัตรรับของที่ระลึก</h1>
   <p>สำหรับเจ้าหน้าที่จุดแลกของ · ใส่ PIN เลือกวิธีอ่านบัตร แล้วกดเริ่ม — ใช้กล้องมือถือ หรือต่อเครื่องสแกนบาร์โค้ดกับแท็บเล็ต/โน้ตบุ๊กก็ได้</p>
   <div><label for="api">ที่อยู่ระบบ (API URL — ผู้ดูแลตั้งให้แล้ว แก้เฉพาะเมื่อผู้ดูแลแจ้ง)</label><input id="api" type="url" autocomplete="off" spellcheck="false"></div>
   <div><label for="pin">PIN เจ้าหน้าที่</label><input id="pin" type="password" inputmode="numeric" autocomplete="off"></div>
@@ -139,14 +139,41 @@
   var cfg = { api: DEFAULT_API, pin: '', lane: '', mode: 'cam' };
   try { var saved = JSON.parse(localStorage.getItem('scanCfg') || '{}'); if (saved.pin) cfg = saved; } catch (e) {}
   if (!cfg.api || /__API/.test(cfg.api)) cfg.api = DEFAULT_API;
+  // ลิงก์จากเมนู "ลิงก์ + QR หน้าสแกน" ในชีต: ?api=<URL ระบบของงานนั้น> → ผูกเครื่องนี้กับงานนั้น
+  (function () {
+    try {
+      var q = new URLSearchParams(location.search), a = (q.get('api') || '').trim();
+      if (/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec/.test(a)) {
+        if (a !== cfg.api) { cfg.api = a; cfg.lane = ''; cfg.lanes = null; }
+        try { localStorage.setItem('scanCfg', JSON.stringify(cfg)); } catch (e) {}
+        history.replaceState(null, '', location.pathname);
+      }
+    } catch (e) {}
+  })();
   document.getElementById('api').value = cfg.api || '';
   document.getElementById('pin').value = cfg.pin || '';
-  (function () {
+  // รายชื่อ Area: ใช้จากชีต "ตั้งค่า" (LANE_LIST / TEAM) ที่ระบบส่งมาตอนตรวจ PIN ถ้ายังไม่เคยได้ ใช้รายการในหน้านี้ไปก่อน
+  function renderLanes(groups) {
+    var sel = document.getElementById('lane');
+    if (groups && groups.length) {
+      var h = '<option value="">— เลือก Area —</option>';
+      groups.forEach(function (g) {
+        h += '<optgroup label="' + esc(g.label) + '">' + g.items.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('') + '</optgroup>';
+      });
+      sel.innerHTML = h + '<option value="__other">อื่น ๆ (พิมพ์เอง)</option>';
+    }
+    selectLane(cfg.lane);
+  }
+  function laneKnown(v) { return Array.prototype.some.call(document.getElementById('lane').options, function (o) { return o.value === v && v !== '__other' && v !== ''; }); }
+  function selectLane(v) {
     var sel = document.getElementById('lane'), oth = document.getElementById('laneOther');
-    var known = Array.prototype.some.call(sel.options, function (o) { return o.value === cfg.lane; });
-    if (cfg.lane && !known) { sel.value = '__other'; oth.value = cfg.lane; oth.style.display = 'block'; } else sel.value = cfg.lane || '';
-    sel.addEventListener('change', function () { oth.style.display = sel.value === '__other' ? 'block' : 'none'; if (sel.value === '__other') oth.focus(); });
-  })();
+    if (v && !laneKnown(v)) { sel.value = '__other'; oth.value = v; oth.style.display = 'block'; } else { sel.value = v || ''; oth.style.display = 'none'; }
+  }
+  document.getElementById('lane').addEventListener('change', function () {
+    var sel = this, oth = document.getElementById('laneOther');
+    oth.style.display = sel.value === '__other' ? 'block' : 'none'; if (sel.value === '__other') oth.focus();
+  });
+  renderLanes(cfg.lanes);
   document.getElementById('mode').value = cfg.mode || 'cam';
   function modeHint() { document.getElementById('modeHint').style.display = document.getElementById('mode').value === 'hid' ? 'block' : 'none'; }
   modeHint();
@@ -195,13 +222,22 @@
     var err = document.getElementById('setupErr');
     if (!/^https:\/\/script\.google\.com\/macros\//.test(cfg.api)) { err.textContent = 'ที่อยู่ระบบไม่ถูกต้อง (ต้องขึ้นต้นด้วย https://script.google.com/macros/)'; return; }
     if (!cfg.pin) { err.textContent = 'กรุณาใส่ PIN'; return; }
-    if (!cfg.lane) { err.textContent = 'กรุณาเลือก Area ผู้แทน'; return; }
     err.textContent = 'กำลังตรวจ PIN…';
     document.getElementById('startBtn').disabled = true;
     api({ action: 'ping', pin: cfg.pin }).then(function (r) {
       document.getElementById('startBtn').disabled = false;
       if (!r.ok) { err.textContent = r.error || 'PIN ไม่ถูกต้อง'; return; }
-      if (r.event) document.getElementById('evName').textContent = r.event;
+      if (r.event) { document.getElementById('evName').textContent = r.event; document.getElementById('setupTitle').textContent = r.event + (r.team ? ' · ' + r.team : ''); }
+      var picked = cfg.lane;
+      if (r.lanes && r.lanes.length) { cfg.lanes = r.lanes; renderLanes(r.lanes); }
+      var custom = document.getElementById('lane').value === '__other';
+      if (!picked || (!laneKnown(picked) && !custom)) {
+        cfg.lane = ''; selectLane('');
+        try { localStorage.setItem('scanCfg', JSON.stringify(cfg)); } catch (e) {}
+        err.textContent = 'PIN ถูกต้อง ✓  เลือก Area ผู้แทนของเครื่องนี้ แล้วกด "เริ่มสแกน" อีกครั้ง';
+        document.getElementById('lane').focus();
+        return;
+      }
       try { localStorage.setItem('scanCfg', JSON.stringify(cfg)); } catch (e) {}
       updateCounts(r);
       document.getElementById('lanePill').textContent = cfg.lane;
