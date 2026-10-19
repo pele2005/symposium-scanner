@@ -931,6 +931,12 @@ function queueThanks_(sh, row) {
 
 /** ส่งอีเมลขอบคุณที่ค้างอยู่ (เรียกจากเมนู หรือ time trigger ทุก 5 นาที) – ส่งเท่าที่โควตาวันนี้เหลือ */
 function sendPendingThanks() {
+  // กันส่งซ้ำ: ถ้ามีอีกบัญชีหนึ่ง (เช่น edu@ กับ symposium.admin) เปิดส่งอัตโนมัติพร้อมกัน ให้ทำทีละรอบเท่านั้น
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return { sent: 0, left: 0, quota: MailApp.getRemainingDailyQuota(), busy: true };
+  try { return sendPendingThanksLocked_(); } finally { lock.releaseLock(); }
+}
+function sendPendingThanksLocked_() {
   var s = getSettings_();
   var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
   ensureCodeCols_(sh);
@@ -965,14 +971,15 @@ function sendPendingThanks() {
 
 function sendPendingThanksMenu() {
   var r = sendPendingThanks();
-  SpreadsheetApp.getUi().alert('ส่งอีเมลขอบคุณแล้ว ' + r.sent + ' ฉบับ' + (r.left ? '\nค้างอยู่ ' + r.left + ' ฉบับ (โควตาวันนี้หมด – เลือกเมนูนี้อีกครั้งพรุ่งนี้ หรือเปิดส่งอัตโนมัติ)' : '') +
+  if (r.busy) { SpreadsheetApp.getUi().alert('ระบบกำลังส่งอีเมลรอบอัตโนมัติอยู่ ลองใหม่อีกครั้งใน 1–2 นาที'); return; }
+  SpreadsheetApp.getUi().alert('ส่งอีเมลขอบคุณแล้ว ' + r.sent + ' ฉบับ' + '\nส่งจากบัญชี: ' + Session.getEffectiveUser().getEmail() + (r.left ? '\nค้างอยู่ ' + r.left + ' ฉบับ (โควตาวันนี้หมด – เลือกเมนูนี้อีกครั้งพรุ่งนี้ หรือเปิดส่งอัตโนมัติ)' : '') +
     '\nโควตาอีเมลคงเหลือวันนี้: ' + r.quota);
 }
 
 function installThanksTrigger() {
   removeThanksTrigger(true);
   ScriptApp.newTrigger('sendPendingThanks').timeBased().everyMinutes(5).create();
-  SpreadsheetApp.getUi().alert('เปิดส่งอีเมลขอบคุณอัตโนมัติแล้ว (ทุก 5 นาที ส่งเท่าที่โควตาวันนี้เหลือ ที่เหลือจะส่งต่อวันถัดไปเอง)\nอย่าลืมตั้ง THANKS_EMAIL = TRUE ในชีต "ตั้งค่า"');
+  SpreadsheetApp.getUi().alert('เปิดส่งอีเมลขอบคุณอัตโนมัติแล้ว\nอีเมลจะส่งจากบัญชี: ' + Session.getEffectiveUser().getEmail() + '\n(ทุก 5 นาที ส่งเท่าที่โควตาวันนี้เหลือ ที่เหลือจะส่งต่อวันถัดไปเอง)\nอย่าลืมตั้ง THANKS_EMAIL = TRUE ในชีต "ตั้งค่า"');
 }
 function removeThanksTrigger(silent) {
   var n = 0;
