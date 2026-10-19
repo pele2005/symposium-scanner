@@ -257,30 +257,47 @@
   function startCam() {
     var hint = document.getElementById('hint');
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { hint.textContent = 'เบราว์เซอร์นี้เปิดกล้องไม่ได้ – พิมพ์รหัสด้านล่างแทน'; return; }
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
       .then(function (s) {
         stream = s; video.srcObject = s; scanning = true;
+        video.setAttribute('playsinline', ''); video.muted = true;
+        var pr = video.play(); if (pr && pr.catch) pr.catch(function () {});   // iOS ต้องสั่ง play() เอง ไม่งั้นภาพไม่เดิน
+        try { var tr = s.getVideoTracks()[0]; if (tr && tr.applyConstraints) tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (e) {}
         if ('BarcodeDetector' in window) { try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; } }
-        hint.textContent = 'เล็ง QR บนบัตรให้อยู่ในกรอบ';
+        hint.textContent = detector ? 'เล็ง QR บนบัตรให้อยู่ในกรอบ' : 'เล็ง QR ให้อยู่ในกรอบ ถือบัตรห่างกล้อง 20–30 ซม. ให้ภาพชัด';
         requestAnimationFrame(tick);
       })
       .catch(function (e) { hint.textContent = 'เปิดกล้องไม่ได้ (' + e.name + ') – อนุญาตกล้องในเบราว์เซอร์ หรือพิมพ์รหัสด้านล่าง'; });
   }
   function stopCam() { scanning = false; if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; } }
 
-  var frameN = 0;
+  // ตัวอ่าน QR สำรอง (iPhone / เบราว์เซอร์ที่ไม่มี BarcodeDetector): ตัดเฉพาะกลางภาพตามกรอบเล็ง แล้วขยาย
+  // เพื่อให้จุดของ QR ใหญ่พอ (QR บนบัตรเป็นลิงก์ยาว จุดถี่) สลับกับอ่านทั้งเฟรมเป็นระยะ
+  var jsqrPass = 0;
+  function decodeJsQR(src, vw, vh) {
+    if (!window.jsQR || !vw || !vh) return '';
+    jsqrPass++;
+    var mode = jsqrPass % 4, sx, sy, sw, sh, out;          // 0 = ทั้งเฟรม, 1/3 = กลางภาพ 78%, 2 = กลางภาพ 55% (ซูม)
+    if (mode === 0) { sx = 0; sy = 0; sw = vw; sh = vh; out = 800; }
+    else { var side = Math.round(Math.min(vw, vh) * (mode === 2 ? 0.55 : 0.78)); sx = Math.round((vw - side) / 2); sy = Math.round((vh - side) / 2); sw = sh = side; out = Math.min(720, side); }
+    var w = out, h = Math.round(out * sh / sw);
+    canvas.width = w; canvas.height = h;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+    var q = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+    return q && q.data ? q.data : '';
+  }
+  var lastDecodeAt = 0;
   function tick() {
     if (!scanning) return;
-    frameN++;
-    if (!busy && video.readyState === 4 && frameN % 3 === 0) {
+    var now = Date.now();
+    if (!busy && video.readyState >= 2 && video.videoWidth && now - lastDecodeAt > (detector ? 90 : 140)) {
+      lastDecodeAt = now;
       if (detector) {
         detector.detect(video).then(function (codes) { if (codes && codes.length) onDecoded(codes[0].rawValue); }).catch(function () {});
-      } else if (window.jsQR) {
-        var w = 480, h = Math.round(480 * video.videoHeight / video.videoWidth) || 480;
-        canvas.width = w; canvas.height = h; ctx.drawImage(video, 0, 0, w, h);
-        var img = ctx.getImageData(0, 0, w, h);
-        var q = jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' });
-        if (q && q.data) onDecoded(q.data);
+      } else {
+        var t = decodeJsQR(video, video.videoWidth, video.videoHeight);
+        if (t) onDecoded(t);
       }
     }
     requestAnimationFrame(tick);
