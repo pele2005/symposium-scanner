@@ -76,7 +76,8 @@ function initSheets() {
       ['API_URL', '', 'URL ระบบ (Web app …/exec) หลัง Deploy – ใช้สร้างลิงก์/QR หน้าสแกนให้เจ้าหน้าที่'],
       ['TEST_PREFIX', 'T', 'ตัวอักษรนำหน้ารหัสบัตรทดสอบ (เมนูล้างบัตรทดสอบจะล้างเฉพาะรหัสที่ขึ้นต้นด้วยตัวนี้)'],
       ['PRIZE_LIMIT', 300, 'จำนวนของที่ระลึกทั้งหมด – ครบแล้วปิดฟอร์มอัตโนมัติ'],
-      ['CODE_COUNT', 300, 'จำนวนบัตร/รหัสที่จะสร้าง (ปกติเท่ากับจำนวนของ)'],
+      ['CODE_COUNT', 316, 'จำนวนบัตรทั้งหมดที่จะสร้าง (บัตรจริง + บัตรทดสอบ)'],
+      ['TEST_COUNT', 16, 'จำนวนบัตรทดสอบ (รหัสขึ้นต้น TEST_PREFIX) – สร้างต่อท้ายบัตรจริง เช่น บัตรจริง S001–S300 แล้วตามด้วย T301–T316'],
       ['CODE_PREFIX', 'S', 'ตัวอักษรนำหน้ารหัส เช่น S → S057-K7QX'],
       ['SECRET_WORD', '', 'คำลับที่ประกาศบนสไลด์ช่วงท้าย (เว้นว่าง = ไม่ใช้)'],
       ['START_TIME', '', 'เวลาเริ่มรับคำตอบ เช่น 25/10/2026 15:00 (เว้นว่าง = ไม่จำกัด)'],
@@ -204,6 +205,7 @@ function getSettings_() {
   vals.forEach(function (r) { if (r[0]) s[String(r[0]).trim()] = r[1]; });
   s.PRIZE_LIMIT = Number(s.PRIZE_LIMIT) || 0;
   s.CODE_COUNT = Number(s.CODE_COUNT) || 0;
+  s.TEST_COUNT = Number(s.TEST_COUNT) || 0;
   s.SEND_EMAIL = String(s.SEND_EMAIL).toUpperCase() === 'TRUE';
   function ask3_(v, dflt) { var x = String(v === undefined || v === '' ? dflt : v).trim().toUpperCase(); return { ask: x !== 'FALSE', req: x === 'TRUE' }; }
   var lic = ask3_(s.ASK_LICENSE, 'TRUE'); s.ASK_LICENSE = lic.ask; s.LICENSE_REQUIRED = lic.req;
@@ -402,30 +404,44 @@ function generateCodes() {
   var ui = SpreadsheetApp.getUi();
   var s = getSettings_();
   var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
-  var existing = Math.max(0, sh.getLastRow() - 1);
-
-  var toAdd = s.CODE_COUNT - existing;
-  if (toAdd <= 0) { ui.alert('มีรหัสอยู่แล้ว ' + existing + ' รหัส (CODE_COUNT = ' + s.CODE_COUNT + ')\nถ้าต้องการเพิ่ม ให้เพิ่มค่า CODE_COUNT แล้วสั่งอีกครั้ง'); return; }
-
-  var used = {};
-  if (existing) sh.getRange(2, 1, existing, 1).getValues().forEach(function (r) { used[r[0]] = true; });
-
-  var width = String(s.CODE_COUNT).length < 3 ? 3 : String(s.CODE_COUNT).length;
-  var rows = [];
-  for (var i = existing + 1; i <= s.CODE_COUNT; i++) {
-    var code;
-    do { code = s.CODE_PREFIX + pad_(i, width) + '-' + randomChars_(4); } while (used[code]);
-    used[code] = true;
-    var blank = [code, ST_EMPTY]; while (blank.length < CODE_HEADERS.length) blank.push('');
-    rows.push(blank);
-  }
   ensureCodeCols_(sh);
-  sh.getRange(existing + 2, 1, rows.length, CODE_HEADERS.length).setValues(rows);
-  sh.getRange(2, C.PHONE, s.CODE_COUNT, 1).setNumberFormat('@');
-  sh.getRange(2, C.LICENSE, s.CODE_COUNT, 1).setNumberFormat('@');
-  sh.getRange(2, C.SCORE, s.CODE_COUNT, 1).setNumberFormat('@');
+  var W = CODE_HEADERS.length, n = Math.max(0, sh.getLastRow() - 1);
+  var px = s.TEST_PREFIX, tc = Math.max(0, Math.min(s.TEST_COUNT, s.CODE_COUNT));
+  var isTest = function (code) { return tc > 0 && px && px !== s.CODE_PREFIX && String(code).toUpperCase().indexOf(px) === 0; };
+
+  // แยกแถวเดิมเป็นบัตรจริง / บัตรทดสอบ (เก็บข้อมูลทุกคอลัมน์ไว้ตามเดิม)
+  var data = n ? sh.getRange(2, 1, n, W).getValues().filter(function (r) { return String(r[0]).trim(); }) : [];
+  var real = data.filter(function (r) { return !isTest(r[0]); }), test = data.filter(function (r) { return isTest(r[0]); });
+  var realTarget = s.CODE_COUNT - tc;
+  var needReal = realTarget - real.length, needTest = tc - test.length;
+  if (needReal <= 0 && needTest <= 0) {
+    ui.alert('มีรหัสครบแล้ว: บัตรจริง ' + real.length + ' + บัตรทดสอบ ' + test.length + ' = ' + data.length + ' รหัส\n(CODE_COUNT = ' + s.CODE_COUNT + ', TEST_COUNT = ' + tc + ')\n\nถ้าต้องการเพิ่ม ให้เพิ่มค่า CODE_COUNT หรือ TEST_COUNT แล้วสั่งอีกครั้ง');
+    return;
+  }
+  var used = {}; data.forEach(function (r) { used[r[0]] = true; });
+  var width = Math.max(3, String(s.CODE_COUNT).length);
+  function make(prefix, num) {
+    var code; do { code = prefix + pad_(num, width) + '-' + randomChars_(4); } while (used[code]);
+    used[code] = true; var row = [code, ST_EMPTY]; while (row.length < W) row.push(''); return row;
+  }
+  function maxNum(rows, prefix) {
+    var m = 0; rows.forEach(function (r) { var x = String(r[0]).slice(prefix.length).match(/^\d+/); if (x) m = Math.max(m, Number(x[0])); }); return m;
+  }
+  // บัตรจริง: S001, S002 … ต่อกันเป็นชุดเดียว · บัตรทดสอบ: ต่อท้าย เลขรันต่อจากบัตรจริง เช่น T311 …
+  var addR = 0, addT = 0;
+  for (var i = 0, k = maxNum(real, s.CODE_PREFIX); i < needReal; i++) { real.push(make(s.CODE_PREFIX, ++k)); addR++; }
+  for (var j = 0, t = Math.max(realTarget, maxNum(test, px)); j < needTest; j++) { test.push(make(px, ++t)); addT++; }
+
+  var rows = real.concat(test);
+  sh.getRange(2, 1, rows.length, W).setValues(rows);
+  sh.getRange(2, C.PHONE, rows.length, 1).setNumberFormat('@');
+  sh.getRange(2, C.LICENSE, rows.length, 1).setNumberFormat('@');
+  sh.getRange(2, C.SCORE, rows.length, 1).setNumberFormat('@');
   updateCardLinks(true);
-  ui.alert('สร้างรหัสเพิ่ม ' + rows.length + ' รหัส (รวม ' + s.CODE_COUNT + ')\n\nขั้นต่อไป: เมนู 4) สร้างลิงก์บัตร แล้วพิมพ์บัตร');
+  ui.alert('สร้างรหัสเพิ่ม: บัตรจริง ' + addR + ' + บัตรทดสอบ ' + addT + ' รหัส\n' +
+    'รวมในชีต: บัตรจริง ' + real.length + ' (' + (real.length ? real[0][0].slice(0, s.CODE_PREFIX.length + width) + '–' + real[real.length - 1][0].slice(0, s.CODE_PREFIX.length + width) : '-') + ')' +
+    (test.length ? ' + บัตรทดสอบ ' + test.length + ' (' + test[0][0].slice(0, px.length + width) + '–' + test[test.length - 1][0].slice(0, px.length + width) + ') ต่อท้าย' : '') +
+    '\n\nสร้างลิงก์บัตร (คอลัมน์ J) ให้แล้ว – คัดลอกไปพิมพ์บัตรได้เลย');
 }
 
 function pad_(n, w) { var s = String(n); while (s.length < w) s = '0' + s; return s; }
@@ -888,6 +904,7 @@ function ensureSchemaMenu() {
   defaults.push(['LANE_LIST', '', 'รายชื่อช่องแลกของในหน้าสแกน รูปแบบ  กลุ่ม=A,B,C | กลุ่ม2=X,Y  (เว้นว่าง = ใช้ค่าตามทีม)']);
   defaults.push(['API_URL', '', 'URL ระบบ (Web app …/exec) หลัง Deploy – ใช้สร้างลิงก์/QR หน้าสแกนให้เจ้าหน้าที่']);
   defaults.push(['TEST_PREFIX', 'T', 'ตัวอักษรนำหน้ารหัสบัตรทดสอบ']);
+  defaults.push(['TEST_COUNT', 0, 'จำนวนบัตรทดสอบ – สร้างต่อท้ายบัตรจริง (CODE_COUNT = บัตรจริง + บัตรทดสอบ)']);
   defaults.push(['HOSPITAL_LABEL', 'โรงพยาบาล / สถานพยาบาล', 'ชื่อช่องสถานที่ทำงานในฟอร์ม (OTC ใช้ "ร้านยา / สถานที่ทำงาน")']);
   defaults.push(['ASK_SPECIALTY', 'TRUE', 'Specialty (dropdown): TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
   defaults.push(['SPECIALTY_LIST', DEFAULT_SPECIALTIES, 'รายการ Specialty ตามลำดับที่ต้องการ คั่นด้วย ;']);
@@ -1238,7 +1255,7 @@ function prepareTemplate() {
   var props = PropertiesService.getScriptProperties();
   ['ITEM_IDS', 'PREFILL_TEMPLATE'].forEach(function (k) { props.deleteProperty(k); });
   ui.alert('ล้างข้อมูลเรียบร้อย ✅ ไฟล์นี้พร้อมเป็นงานใหม่\n\n' +
-    '1) แก้ชีต "ตั้งค่า": EVENT_NAME, TEAM, PRIZE_LIMIT, CODE_COUNT, STAFF_PIN ใหม่\n' +
+    '1) แก้ชีต "ตั้งค่า": EVENT_NAME, TEAM, PRIZE_LIMIT, CODE_COUNT, TEST_COUNT, STAFF_PIN ใหม่\n' +
     '2) เมนู "ตั้งค่าตามทีม"\n3) แก้ชีต "คำถาม"\n4) เมนู 2) สร้างฟอร์ม → 3) สร้างรหัส → 4) สร้างลิงก์บัตร\n' +
     '5) Deploy → New deployment (Web app) → วาง URL ในแถว API_URL → เมนู "ลิงก์ + QR หน้าสแกน"\n\n' +
     'หมายเหตุ: ฟอร์มสำเนาที่ Google สร้างให้ตอนทำสำเนาไฟล์ ไม่ได้ใช้แล้ว ลบทิ้งจาก Drive ได้');
