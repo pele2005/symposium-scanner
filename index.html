@@ -138,6 +138,11 @@
 <script src="jsQR.min.js?v=140"></script>
 <script>if (!window.jsQR) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"><\/script>');</script>
 <script>
+  // เปิดจากในแอป LINE ใช้กล้องไม่ได้ → ให้ LINE เปิดลิงก์นี้ใน Chrome/Safari แทน (LINE รองรับ openExternalBrowser=1)
+  var IN_LINE = /\bLine\//i.test(navigator.userAgent);
+  if (IN_LINE && !/[?&]openExternalBrowser=1/.test(location.search)) {
+    location.replace(location.href.split('#')[0] + (location.search ? '&' : '?') + 'openExternalBrowser=1');
+  }
   var DEFAULT_API = 'https://script.google.com/macros/s/AKfycbx-Lp7HZ-pC85wT38CYtdH5D9css-n0nSI7npU8N_Ixx96N4EA7T-7b6dUkAOnrfftJaw/exec';
   var cfg = { api: DEFAULT_API, pin: '', lane: '', mode: 'cam' };
   try { var saved = JSON.parse(localStorage.getItem('scanCfg') || '{}'); if (saved.pin) cfg = saved; } catch (e) {}
@@ -285,7 +290,7 @@
         setTimeout(camDiag, 1500);
         requestAnimationFrame(tick);
       })
-      .catch(function (e) { hint.textContent = 'เปิดกล้องไม่ได้ (' + e.name + ') – อนุญาตกล้องในเบราว์เซอร์ หรือพิมพ์รหัสด้านล่าง'; });
+      .catch(function (e) { hint.textContent = IN_LINE ? 'เปิดจากในแอป LINE ใช้กล้องไม่ได้ – แตะ ⋮ มุมขวาบน → "เปิดในเบราว์เซอร์" (Chrome/Safari)' : 'เปิดกล้องไม่ได้ (' + e.name + ') – อนุญาตกล้องในเบราว์เซอร์ หรือพิมพ์รหัสด้านล่าง'; });
   }
   function stopCam() { scanning = false; if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; } }
 
