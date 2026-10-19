@@ -110,7 +110,7 @@
     <div class="manual">
       <input id="manual" placeholder="หรือพิมพ์รหัส เช่น S057-K7QX" autocapitalize="characters" autocomplete="off">
       <button class="btn" onclick="manualGo()">ตรวจ</button>
-      <label class="btn ghost" id="snapBtn" style="display:inline-flex;align-items:center;white-space:nowrap">📷 ถ่ายรูป<input id="snap" type="file" accept="image/*" capture="environment" style="display:none"></label>
+
     </div>
     <div id="camInfo" style="font-size:11px;color:var(--muted)"></div>
     <div class="hist" id="hist"></div>
@@ -163,7 +163,10 @@
   // รายชื่อ Area: ใช้จากชีต "ตั้งค่า" (LANE_LIST / TEAM) ที่ระบบส่งมาตอนตรวจ PIN ถ้ายังไม่เคยได้ ใช้รายการในหน้านี้ไปก่อน
   function renderLanes(groups) {
     var sel = document.getElementById('lane');
-    if (groups && groups.length) {
+    // เมนูแสดงเฉพาะ Area ผู้แทน (รหัสขึ้นต้นด้วยตัวเลข เช่น 1XX / 2XX / 5XX) · NSM / SM / PM ฯลฯ เลือก "ตำแหน่งอื่น" แล้วพิมพ์ชื่อ
+    groups = (groups || []).map(function (g) { return { label: g.label, items: (g.items || []).filter(function (x) { return /^\d/.test(String(x).trim()); }) }; })
+                           .filter(function (g) { return g.items.length; });
+    if (groups.length) {
       var h = '<option value="">— เลือก Area —</option>';
       groups.forEach(function (g) {
         h += '<optgroup label="' + esc(g.label) + '">' + g.items.map(function (x) { return '<option value="' + esc(x) + '">' + esc(x) + '</option>'; }).join('') + '</optgroup>';
@@ -286,7 +289,7 @@
         var pr = video.play(); if (pr && pr.catch) pr.catch(function () {});   // iOS ต้องสั่ง play() เอง ไม่งั้นภาพไม่เดิน
         if (isIOS) { try { var tr = s.getVideoTracks()[0]; if (tr && tr.applyConstraints) tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (e) {} }
         if ('BarcodeDetector' in window) { try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; } }
-        hint.textContent = detector ? 'เล็ง QR บนบัตรให้อยู่ในกรอบ' : 'เล็ง QR ให้อยู่ในกรอบ ถือบัตรห่างกล้อง 20–30 ซม. · ถ้าไม่ติด กด 📷 ถ่ายรูป';
+        hint.textContent = detector ? 'เล็ง QR บนบัตรให้อยู่ในกรอบ' : 'เล็ง QR ให้อยู่ในกรอบ ถือบัตรห่างกล้อง 20–30 ซม.';
         setTimeout(camDiag, 1500);
         requestAnimationFrame(tick);
       })
@@ -316,36 +319,6 @@
     el.textContent = 'กล้อง ' + (video.videoWidth || 0) + '×' + (video.videoHeight || 0) + ' · ' + (detector ? 'ตัวอ่านในเครื่อง' : (window.jsQR ? 'ตัวอ่านสำรอง' : 'ไม่มีตัวอ่าน QR')) + ' · อ่าน ' + decodes + ' ครั้ง';
     if (scanning) setTimeout(camDiag, 2000);
   }
-  // ทางสำรองสำหรับ iPhone: ถ่ายรูปบัตรด้วยกล้องของเครื่อง (ภาพความละเอียดสูง โฟกัสอัตโนมัติ) แล้วอ่าน QR จากรูป
-  document.getElementById('snap').addEventListener('change', function () {
-    var f = this.files && this.files[0]; this.value = '';
-    if (!f) return;
-    var url = URL.createObjectURL(f), img = new Image();
-    showResult('busy', 'กำลังอ่าน QR จากรูป…', '', '', '');
-    img.onload = function () {
-      var t = '', err = '', W = img.naturalWidth, H = img.naturalHeight;
-      try {
-        // ลองหลายระดับ: ทั้งรูป (ย่อ), กลางรูป 70%, กลางรูป 45%
-        var tries = [[0, 0, W, H, 1400], [0.15, 0.15, 0.7, 0.7, 1200], [0.275, 0.275, 0.45, 0.45, 1000], [0, 0, W, H, 900], [0, 0, W, H, 2000], [0.1, 0.1, 0.8, 0.8, 1800], [0, 0, W, H, 600]];
-        for (var i = 0; i < tries.length && !t; i++) {
-          var a = tries[i], sx = a[0] < 1 ? a[0] * W : a[0], sy = a[1] < 1 ? a[1] * H : a[1];
-          var sw = a[2] <= 1 ? a[2] * W : a[2], sh = a[3] <= 1 ? a[3] * H : a[3];
-          var sc = Math.min(1, a[4] / Math.max(sw, sh)), w = Math.round(sw * sc), h = Math.round(sh * sc);
-          canvas.width = w; canvas.height = h; ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
-          var q = window.jsQR && jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'attemptBoth' });
-          if (q && q.data) t = q.data;
-        }
-      } catch (e) { err = (e && e.message) || String(e); }
-      URL.revokeObjectURL(url);
-      busy = false;
-      var code = extractCode(t);
-      if (code) { lastCode = code; lastAt = Date.now(); redeem(code); }
-      else if (t) { showResult('warn', 'QR นี้ไม่ใช่บัตรของงาน', '', '', String(t).slice(0, 60)); beep(false); }
-      else { showResult('warn', window.jsQR ? 'อ่าน QR จากรูปไม่ได้' : 'โหลดตัวอ่าน QR ไม่ได้', '', '', window.jsQR ? ('รูป ' + W + '×' + H + (err ? ' · ' + err : '') + ' · ถ่ายใหม่ให้ QR ชัดเต็มกลางภาพ หรือพิมพ์รหัสใต้ QR') : 'รีเฟรชหน้า หรือปิดตัวบล็อกโฆษณา/Private Relay แล้วลองใหม่'); beep(false); }
-    };
-    img.onerror = function () { busy = false; showResult('warn', 'เปิดรูปไม่ได้', '', '', 'ลองถ่ายใหม่'); };
-    busy = true; img.src = url;
-  });
   var lastDecodeAt = 0, detFail = 0;   // ตัวอ่านในเครื่อง Android ใช้ไม่ได้ติดกันหลายครั้ง → สลับไปใช้ jsQR
   function tick() {
     if (!scanning) return;
