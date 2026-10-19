@@ -112,7 +112,6 @@
       <button class="btn" onclick="manualGo()">ตรวจ</button>
 
     </div>
-    <div id="camInfo" style="font-size:11px;color:var(--muted)"></div>
     <div class="hist" id="hist"></div>
   </div>
 </div>
@@ -290,7 +289,6 @@
         if (isIOS) { try { var tr = s.getVideoTracks()[0]; if (tr && tr.applyConstraints) tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (e) {} }
         if ('BarcodeDetector' in window) { try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; } }
         hint.textContent = detector ? 'เล็ง QR บนบัตรให้อยู่ในกรอบ' : 'เล็ง QR ให้อยู่ในกรอบ ถือบัตรห่างกล้อง 20–30 ซม.';
-        setTimeout(camDiag, 1500);
         requestAnimationFrame(tick);
       })
       .catch(function (e) { hint.textContent = IN_LINE ? 'เปิดจากในแอป LINE ใช้กล้องไม่ได้ – แตะ ⋮ มุมขวาบน → "เปิดในเบราว์เซอร์" (Chrome/Safari)' : 'เปิดกล้องไม่ได้ (' + e.name + ') – อนุญาตกล้องในเบราว์เซอร์ หรือพิมพ์รหัสด้านล่าง'; });
