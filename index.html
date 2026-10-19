@@ -260,12 +260,26 @@
   function startCam() {
     var hint = document.getElementById('hint');
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { hint.textContent = 'เบราว์เซอร์นี้เปิดกล้องไม่ได้ – พิมพ์รหัสด้านล่างแทน'; return; }
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+    // iPhone: ขอภาพ 1080p + สั่ง play() เอง · Android/อื่นๆ: ใช้ 720p แบบเดิมที่ใช้งานได้ · ถ้าเปิดไม่ได้ ลดเงื่อนไขลงทีละขั้น
+    var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var tries = [
+      isIOS ? { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+            : { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      { facingMode: { ideal: 'environment' } },
+      true
+    ];
+    function openCam(i) {
+      return navigator.mediaDevices.getUserMedia({ video: tries[i], audio: false }).catch(function (e) {
+        if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError') || i >= tries.length - 1) throw e;
+        return openCam(i + 1);
+      });
+    }
+    openCam(0)
       .then(function (s) {
         stream = s; video.srcObject = s; scanning = true;
         video.setAttribute('playsinline', ''); video.muted = true;
         var pr = video.play(); if (pr && pr.catch) pr.catch(function () {});   // iOS ต้องสั่ง play() เอง ไม่งั้นภาพไม่เดิน
-        try { var tr = s.getVideoTracks()[0]; if (tr && tr.applyConstraints) tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (e) {}
+        if (isIOS) { try { var tr = s.getVideoTracks()[0]; if (tr && tr.applyConstraints) tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (e) {} }
         if ('BarcodeDetector' in window) { try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; } }
         hint.textContent = detector ? 'เล็ง QR บนบัตรให้อยู่ในกรอบ' : 'เล็ง QR ให้อยู่ในกรอบ ถือบัตรห่างกล้อง 20–30 ซม. · ถ้าไม่ติด กด 📷 ถ่ายรูป';
         setTimeout(camDiag, 1500);
@@ -327,7 +341,7 @@
     img.onerror = function () { busy = false; showResult('warn', 'เปิดรูปไม่ได้', '', '', 'ลองถ่ายใหม่'); };
     busy = true; img.src = url;
   });
-  var lastDecodeAt = 0;
+  var lastDecodeAt = 0, detFail = 0;   // ตัวอ่านในเครื่อง Android ใช้ไม่ได้ติดกันหลายครั้ง → สลับไปใช้ jsQR
   function tick() {
     if (!scanning) return;
     var now = Date.now();
@@ -335,7 +349,7 @@
       lastDecodeAt = now;
       if (detector) {
         decodes++;
-        detector.detect(video).then(function (codes) { if (codes && codes.length) onDecoded(codes[0].rawValue); }).catch(function () {});
+        detector.detect(video).then(function (codes) { detFail = 0; if (codes && codes.length) onDecoded(codes[0].rawValue); }).catch(function () { if (++detFail >= 15 && window.jsQR) detector = null; });
       } else {
         decodes++;
         var t = decodeJsQR(video, video.videoWidth, video.videoHeight);
