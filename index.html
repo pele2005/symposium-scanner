@@ -110,7 +110,9 @@
     <div class="manual">
       <input id="manual" placeholder="หรือพิมพ์รหัส เช่น S057-K7QX" autocapitalize="characters" autocomplete="off">
       <button class="btn" onclick="manualGo()">ตรวจ</button>
+      <label class="btn ghost" id="snapBtn" style="display:inline-flex;align-items:center;white-space:nowrap">📷 ถ่ายรูป<input id="snap" type="file" accept="image/*" capture="environment" style="display:none"></label>
     </div>
+    <div id="camInfo" style="font-size:11px;color:var(--muted)"></div>
     <div class="hist" id="hist"></div>
   </div>
 </div>
@@ -264,7 +266,8 @@
         var pr = video.play(); if (pr && pr.catch) pr.catch(function () {});   // iOS ต้องสั่ง play() เอง ไม่งั้นภาพไม่เดิน
         try { var tr = s.getVideoTracks()[0]; if (tr && tr.applyConstraints) tr.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (e) {}
         if ('BarcodeDetector' in window) { try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; } }
-        hint.textContent = detector ? 'เล็ง QR บนบัตรให้อยู่ในกรอบ' : 'เล็ง QR ให้อยู่ในกรอบ ถือบัตรห่างกล้อง 20–30 ซม. ให้ภาพชัด';
+        hint.textContent = detector ? 'เล็ง QR บนบัตรให้อยู่ในกรอบ' : 'เล็ง QR ให้อยู่ในกรอบ ถือบัตรห่างกล้อง 20–30 ซม. · ถ้าไม่ติด กด 📷 ถ่ายรูป';
+        setTimeout(camDiag, 1500);
         requestAnimationFrame(tick);
       })
       .catch(function (e) { hint.textContent = 'เปิดกล้องไม่ได้ (' + e.name + ') – อนุญาตกล้องในเบราว์เซอร์ หรือพิมพ์รหัสด้านล่าง'; });
@@ -287,6 +290,41 @@
     var q = jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
     return q && q.data ? q.data : '';
   }
+  var decodes = 0;
+  function camDiag() {
+    var el = document.getElementById('camInfo'); if (!el) return;
+    el.textContent = 'กล้อง ' + (video.videoWidth || 0) + '×' + (video.videoHeight || 0) + ' · ' + (detector ? 'ตัวอ่านในเครื่อง' : (window.jsQR ? 'ตัวอ่านสำรอง' : 'ไม่มีตัวอ่าน QR')) + ' · อ่าน ' + decodes + ' ครั้ง';
+    if (scanning) setTimeout(camDiag, 2000);
+  }
+  // ทางสำรองสำหรับ iPhone: ถ่ายรูปบัตรด้วยกล้องของเครื่อง (ภาพความละเอียดสูง โฟกัสอัตโนมัติ) แล้วอ่าน QR จากรูป
+  document.getElementById('snap').addEventListener('change', function () {
+    var f = this.files && this.files[0]; this.value = '';
+    if (!f) return;
+    var url = URL.createObjectURL(f), img = new Image();
+    showResult('busy', 'กำลังอ่าน QR จากรูป…', '', '', '');
+    img.onload = function () {
+      var t = '', W = img.naturalWidth, H = img.naturalHeight;
+      try {
+        // ลองหลายระดับ: ทั้งรูป (ย่อ), กลางรูป 70%, กลางรูป 45%
+        var tries = [[0, 0, W, H, 1400], [0.15, 0.15, 0.7, 0.7, 1200], [0.275, 0.275, 0.45, 0.45, 1000], [0, 0, W, H, 900]];
+        for (var i = 0; i < tries.length && !t; i++) {
+          var a = tries[i], sx = a[0] < 1 ? a[0] * W : a[0], sy = a[1] < 1 ? a[1] * H : a[1];
+          var sw = a[2] <= 1 ? a[2] * W : a[2], sh = a[3] <= 1 ? a[3] * H : a[3];
+          var sc = Math.min(1, a[4] / Math.max(sw, sh)), w = Math.round(sw * sc), h = Math.round(sh * sc);
+          canvas.width = w; canvas.height = h; ctx.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+          var q = window.jsQR && jsQR(ctx.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'attemptBoth' });
+          if (q && q.data) t = q.data;
+        }
+      } catch (e) {}
+      URL.revokeObjectURL(url);
+      busy = false;
+      var code = extractCode(t);
+      if (code) { lastCode = code; lastAt = Date.now(); redeem(code); }
+      else { showResult('warn', 'อ่าน QR จากรูปไม่ได้', '', '', 'ถ่ายใหม่ให้ QR ชัดและอยู่กลางภาพ หรือพิมพ์รหัสใต้ QR'); beep(false); }
+    };
+    img.onerror = function () { busy = false; showResult('warn', 'เปิดรูปไม่ได้', '', '', 'ลองถ่ายใหม่'); };
+    busy = true; img.src = url;
+  });
   var lastDecodeAt = 0;
   function tick() {
     if (!scanning) return;
@@ -294,8 +332,10 @@
     if (!busy && video.readyState >= 2 && video.videoWidth && now - lastDecodeAt > (detector ? 90 : 140)) {
       lastDecodeAt = now;
       if (detector) {
+        decodes++;
         detector.detect(video).then(function (codes) { if (codes && codes.length) onDecoded(codes[0].rawValue); }).catch(function () {});
       } else {
+        decodes++;
         var t = decodeJsQR(video, video.videoWidth, video.videoHeight);
         if (t) onDecoded(t);
       }
