@@ -208,6 +208,7 @@ function getSettings_() {
   s.CODE_COUNT = Number(s.CODE_COUNT) || 0;
   s.TEST_COUNT = Number(s.TEST_COUNT) || 0;
   s.THANKS_SENDER = String(s.THANKS_SENDER || '').trim().toLowerCase();
+  s.THANKS_METHOD = String(s.THANKS_METHOD || '').trim().toUpperCase();
   s.SEND_EMAIL = String(s.SEND_EMAIL).toUpperCase() === 'TRUE';
   function ask3_(v, dflt) { var x = String(v === undefined || v === '' ? dflt : v).trim().toUpperCase(); return { ask: x !== 'FALSE', req: x === 'TRUE' }; }
   var lic = ask3_(s.ASK_LICENSE, 'TRUE'); s.ASK_LICENSE = lic.ask; s.LICENSE_REQUIRED = lic.req;
@@ -906,6 +907,7 @@ function ensureSchemaMenu() {
   defaults.push(['LANE_LIST', '', 'รายชื่อช่องแลกของในหน้าสแกน รูปแบบ  กลุ่ม=A,B,C | กลุ่ม2=X,Y  (เว้นว่าง = ใช้ค่าตามทีม)']);
   defaults.push(['API_URL', '', 'URL ระบบ (Web app …/exec) หลัง Deploy – ใช้สร้างลิงก์/QR หน้าสแกนให้เจ้าหน้าที่']);
   defaults.push(['TEST_PREFIX', 'T', 'ตัวอักษรนำหน้ารหัสบัตรทดสอบ']);
+  defaults.push(['THANKS_METHOD', '', 'วิธีส่งอีเมลขอบคุณ: ว่าง = แบบ A (MailApp) · GMAIL = แบบ B ส่งผ่าน Gmail ของบัญชี (ใช้เมื่อแบบ A ไม่ถึงผู้รับ)']);
   defaults.push(['THANKS_SENDER', '', 'บัญชีที่ให้ส่งอีเมลขอบคุณ เช่น edu@trbapp.com (เว้นว่าง = บัญชีที่กดเปิดส่งอัตโนมัติ) – บัญชีอื่นจะไม่ส่ง']);
   defaults.push(['TEST_COUNT', 0, 'จำนวนบัตรทดสอบ – สร้างต่อท้ายบัตรจริง (CODE_COUNT = บัตรจริง + บัตรทดสอบ)']);
   defaults.push(['HOSPITAL_LABEL', 'โรงพยาบาล / สถานพยาบาล', 'ชื่อช่องสถานที่ทำงานในฟอร์ม (OTC ใช้ "ร้านยา / สถานที่ทำงาน")']);
@@ -966,7 +968,7 @@ function sendPendingThanksLocked_() {
         '  บัตรหมายเลข: ' + r[C.CODE - 1] + '\n' +
         '  เวลารับของ: ' + fmt_(r[C.REDEEMED_AT - 1]) + '\n\n' +
         'ขอบคุณที่ร่วมงาน\n' + s.EVENT_NAME + '\nTRB Chemedica (Thailand) Ltd.';
-      MailApp.sendEmail({ to: email, subject: subject, body: body, name: s.EVENT_NAME });
+      sendMail_(s, email, subject, body);
       sh.getRange(i + 2, C.THANKS).setValue('ส่งแล้ว ' + fmt_(new Date()) + (me ? ' (จาก ' + me + ')' : ''));
       sent++;
     } catch (err) {
@@ -984,6 +986,13 @@ function sendPendingThanksMenu() {
     '\nโควตาอีเมลคงเหลือวันนี้: ' + r.quota);
 }
 
+/** ส่งอีเมล: THANKS_METHOD = GMAIL → ส่งผ่าน Gmail ของบัญชี (เหมือนกดส่งเอง) · อื่นๆ/ว่าง → MailApp */
+function sendMail_(s, to, subject, body, method) {
+  var m = String(method || s.THANKS_METHOD || '').toUpperCase();
+  if (m === 'GMAIL') GmailApp.sendEmail(to, subject, body, { name: s.EVENT_NAME });
+  else MailApp.sendEmail({ to: to, subject: subject, body: body, name: s.EVENT_NAME });
+}
+
 /** ส่งอีเมลขอบคุณตัวอย่าง 1 ฉบับไปยังอีเมลที่พิมพ์ – ไม่แตะข้อมูลในชีต · บอกบัญชีผู้ส่ง โควตาที่เหลือ และข้อผิดพลาด (ถ้ามี) */
 function testThanksEmail() {
   var ui = SpreadsheetApp.getUi(), s = getSettings_(), me = '';
@@ -994,17 +1003,17 @@ function testThanksEmail() {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { ui.alert('อีเมลไม่ถูกต้อง: ' + to); return; }
   var quota = MailApp.getRemainingDailyQuota();
   if (quota < 1) { ui.alert('ส่งไม่ได้: โควตาอีเมลของบัญชี ' + me + ' วันนี้หมดแล้ว (คงเหลือ 0)\nจะส่งได้อีกครั้งหลังเที่ยงคืนตามเวลาแปซิฟิก (ประมาณ 14:00–15:00 น. เวลาไทย)'); return; }
-  try {
-    MailApp.sendEmail({ to: to, name: s.EVENT_NAME,
-      subject: '🎁 ' + s.EVENT_NAME + ' – ขอบคุณที่ร่วมกิจกรรม (ทดสอบ)',
-      body: 'เรียน ท่านผู้เข้าร่วมประชุม\n\n' + (s.THANKS_TEXT ? s.THANKS_TEXT + '\n\n' : '') +
-        'อีเมลนี้เป็นการยืนยันว่าท่านได้รับของที่ระลึกเรียบร้อยแล้ว\n  บัตรหมายเลข: TEST\n  เวลารับของ: ' + fmt_(new Date()) +
-        '\n\nขอบคุณที่ร่วมงาน\n' + s.EVENT_NAME + '\nTRB Chemedica (Thailand) Ltd.\n\n(ข้อความทดสอบ)' });
-    ui.alert('ส่งแล้ว ✓\nจาก: ' + me + '\nถึง: ' + to + '\nโควตาคงเหลือวันนี้: ' + MailApp.getRemainingDailyQuota() +
-      '\n\nถ้าไม่เห็นใน Inbox ภายใน 2–3 นาที ให้ดู Spam / Promotions และดูกล่องเมลของ ' + me + ' ว่ามีเมลตีกลับ (Mail Delivery Subsystem) หรือไม่');
-  } catch (err) {
-    ui.alert('ส่งไม่สำเร็จ\nจาก: ' + me + '\nข้อผิดพลาด: ' + (err && err.message || err));
-  }
+  var body = 'เรียน ท่านผู้เข้าร่วมประชุม\n\n' + (s.THANKS_TEXT ? s.THANKS_TEXT + '\n\n' : '') +
+    'อีเมลนี้เป็นการยืนยันว่าท่านได้รับของที่ระลึกเรียบร้อยแล้ว\n  บัตรหมายเลข: TEST\n  เวลารับของ: ' + fmt_(new Date()) +
+    '\n\nขอบคุณที่ร่วมงาน\n' + s.EVENT_NAME + '\nTRB Chemedica (Thailand) Ltd.\n\n(ข้อความทดสอบ)';
+  var res = [];
+  [['MAIL', 'แบบ A'], ['GMAIL', 'แบบ B']].forEach(function (m) {
+    try { sendMail_(s, to, '🎁 ' + s.EVENT_NAME + ' – ขอบคุณที่ร่วมกิจกรรม (ทดสอบ ' + m[1] + ')', body, m[0]); res.push(m[1] + ': ส่งแล้ว ✓'); }
+    catch (err) { res.push(m[1] + ': ส่งไม่สำเร็จ – ' + (err && err.message || err)); }
+  });
+  ui.alert('ทดสอบส่ง 2 แบบ\nจาก: ' + me + '\nถึง: ' + to + '\n\n' + res.join('\n') +
+    '\n\nดูว่าฉบับไหนเข้ากล่องเมลผู้รับ (หัวเรื่องลงท้าย "ทดสอบ แบบ A" / "ทดสอบ แบบ B")\nถ้าได้เฉพาะแบบ B → ชีต ตั้งค่า ใส่ THANKS_METHOD = GMAIL' +
+    '\n(ตอนนี้ THANKS_METHOD = ' + (s.THANKS_METHOD || 'ว่าง = แบบ A') + ' · โควตาคงเหลือ ' + MailApp.getRemainingDailyQuota() + ')');
 }
 
 function installThanksTrigger() {
