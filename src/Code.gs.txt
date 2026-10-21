@@ -45,6 +45,7 @@ function onOpen() {
     .addItem('ดูสรุปยอด', 'showSummary')
     .addSeparator()
     .addItem('ส่งอีเมลขอบคุณที่ค้างอยู่ (ตอนนี้)', 'sendPendingThanksMenu')
+    .addItem('ทดสอบส่งอีเมลขอบคุณ (ส่งหาอีเมลที่พิมพ์)', 'testThanksEmail')
     .addItem('เปิดส่งอีเมลขอบคุณอัตโนมัติ (ทุก 5 นาที)', 'installThanksTrigger')
     .addItem('ปิดส่งอีเมลขอบคุณอัตโนมัติ', 'removeThanksTrigger')
     .addItem('เพิ่มค่าตั้งค่า/คอลัมน์ที่ขาด (หลังอัปเดตโค้ด)', 'ensureSchemaMenu')
@@ -981,6 +982,29 @@ function sendPendingThanksMenu() {
   if (r.wrongSender) { SpreadsheetApp.getUi().alert('ไม่ได้ส่ง: ชีต ตั้งค่า กำหนด THANKS_SENDER ให้ส่งจากบัญชีอื่น\nบัญชีที่ใช้อยู่: ' + r.wrongSender); return; }
   SpreadsheetApp.getUi().alert('ส่งอีเมลขอบคุณแล้ว ' + r.sent + ' ฉบับ' + '\nส่งจากบัญชี: ' + Session.getEffectiveUser().getEmail() + (r.left ? '\nค้างอยู่ ' + r.left + ' ฉบับ (โควตาวันนี้หมด – เลือกเมนูนี้อีกครั้งพรุ่งนี้ หรือเปิดส่งอัตโนมัติ)' : '') +
     '\nโควตาอีเมลคงเหลือวันนี้: ' + r.quota);
+}
+
+/** ส่งอีเมลขอบคุณตัวอย่าง 1 ฉบับไปยังอีเมลที่พิมพ์ – ไม่แตะข้อมูลในชีต · บอกบัญชีผู้ส่ง โควตาที่เหลือ และข้อผิดพลาด (ถ้ามี) */
+function testThanksEmail() {
+  var ui = SpreadsheetApp.getUi(), s = getSettings_(), me = '';
+  try { me = String(Session.getEffectiveUser().getEmail() || ''); } catch (e) {}
+  var r = ui.prompt('ทดสอบส่งอีเมลขอบคุณ', 'พิมพ์อีเมลผู้รับ (ส่งจากบัญชี: ' + (me || 'ไม่ทราบ') + ')', ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  var to = String(r.getResponseText() || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { ui.alert('อีเมลไม่ถูกต้อง: ' + to); return; }
+  var quota = MailApp.getRemainingDailyQuota();
+  if (quota < 1) { ui.alert('ส่งไม่ได้: โควตาอีเมลของบัญชี ' + me + ' วันนี้หมดแล้ว (คงเหลือ 0)\nจะส่งได้อีกครั้งหลังเที่ยงคืนตามเวลาแปซิฟิก (ประมาณ 14:00–15:00 น. เวลาไทย)'); return; }
+  try {
+    MailApp.sendEmail({ to: to, name: s.EVENT_NAME,
+      subject: '🎁 ' + s.EVENT_NAME + ' – ขอบคุณที่ร่วมกิจกรรม (ทดสอบ)',
+      body: 'เรียน ท่านผู้เข้าร่วมประชุม\n\n' + (s.THANKS_TEXT ? s.THANKS_TEXT + '\n\n' : '') +
+        'อีเมลนี้เป็นการยืนยันว่าท่านได้รับของที่ระลึกเรียบร้อยแล้ว\n  บัตรหมายเลข: TEST\n  เวลารับของ: ' + fmt_(new Date()) +
+        '\n\nขอบคุณที่ร่วมงาน\n' + s.EVENT_NAME + '\nTRB Chemedica (Thailand) Ltd.\n\n(ข้อความทดสอบ)' });
+    ui.alert('ส่งแล้ว ✓\nจาก: ' + me + '\nถึง: ' + to + '\nโควตาคงเหลือวันนี้: ' + MailApp.getRemainingDailyQuota() +
+      '\n\nถ้าไม่เห็นใน Inbox ภายใน 2–3 นาที ให้ดู Spam / Promotions และดูกล่องเมลของ ' + me + ' ว่ามีเมลตีกลับ (Mail Delivery Subsystem) หรือไม่');
+  } catch (err) {
+    ui.alert('ส่งไม่สำเร็จ\nจาก: ' + me + '\nข้อผิดพลาด: ' + (err && err.message || err));
+  }
 }
 
 function installThanksTrigger() {
