@@ -206,6 +206,7 @@ function getSettings_() {
   s.PRIZE_LIMIT = Number(s.PRIZE_LIMIT) || 0;
   s.CODE_COUNT = Number(s.CODE_COUNT) || 0;
   s.TEST_COUNT = Number(s.TEST_COUNT) || 0;
+  s.THANKS_SENDER = String(s.THANKS_SENDER || '').trim().toLowerCase();
   s.SEND_EMAIL = String(s.SEND_EMAIL).toUpperCase() === 'TRUE';
   function ask3_(v, dflt) { var x = String(v === undefined || v === '' ? dflt : v).trim().toUpperCase(); return { ask: x !== 'FALSE', req: x === 'TRUE' }; }
   var lic = ask3_(s.ASK_LICENSE, 'TRUE'); s.ASK_LICENSE = lic.ask; s.LICENSE_REQUIRED = lic.req;
@@ -904,6 +905,7 @@ function ensureSchemaMenu() {
   defaults.push(['LANE_LIST', '', 'รายชื่อช่องแลกของในหน้าสแกน รูปแบบ  กลุ่ม=A,B,C | กลุ่ม2=X,Y  (เว้นว่าง = ใช้ค่าตามทีม)']);
   defaults.push(['API_URL', '', 'URL ระบบ (Web app …/exec) หลัง Deploy – ใช้สร้างลิงก์/QR หน้าสแกนให้เจ้าหน้าที่']);
   defaults.push(['TEST_PREFIX', 'T', 'ตัวอักษรนำหน้ารหัสบัตรทดสอบ']);
+  defaults.push(['THANKS_SENDER', '', 'บัญชีที่ให้ส่งอีเมลขอบคุณ เช่น edu@trbapp.com (เว้นว่าง = บัญชีที่กดเปิดส่งอัตโนมัติ) – บัญชีอื่นจะไม่ส่ง']);
   defaults.push(['TEST_COUNT', 0, 'จำนวนบัตรทดสอบ – สร้างต่อท้ายบัตรจริง (CODE_COUNT = บัตรจริง + บัตรทดสอบ)']);
   defaults.push(['HOSPITAL_LABEL', 'โรงพยาบาล / สถานพยาบาล', 'ชื่อช่องสถานที่ทำงานในฟอร์ม (OTC ใช้ "ร้านยา / สถานที่ทำงาน")']);
   defaults.push(['ASK_SPECIALTY', 'TRUE', 'Specialty (dropdown): TRUE = บังคับ, OPTIONAL = ไม่บังคับ, FALSE = ไม่ถาม']);
@@ -938,6 +940,10 @@ function sendPendingThanks() {
 }
 function sendPendingThanksLocked_() {
   var s = getSettings_();
+  // THANKS_SENDER: ถ้ากำหนดไว้ ให้ส่งได้เฉพาะบัญชีนั้น (ตัวส่งอัตโนมัติของบัญชีอื่นที่ยังเปิดค้างจะข้ามไปเอง)
+  var me = '';
+  try { me = String(Session.getEffectiveUser().getEmail() || '').toLowerCase(); } catch (e) {}
+  if (s.THANKS_SENDER && me && me !== s.THANKS_SENDER) return { sent: 0, left: 0, quota: MailApp.getRemainingDailyQuota(), wrongSender: me };
   var sh = SpreadsheetApp.getActive().getSheetByName(SH_CODES);
   ensureCodeCols_(sh);
   var n = Math.max(0, sh.getLastRow() - 1);
@@ -960,7 +966,7 @@ function sendPendingThanksLocked_() {
         '  เวลารับของ: ' + fmt_(r[C.REDEEMED_AT - 1]) + '\n\n' +
         'ขอบคุณที่ร่วมงาน\n' + s.EVENT_NAME + '\nTRB Chemedica (Thailand) Ltd.';
       MailApp.sendEmail({ to: email, subject: subject, body: body, name: s.EVENT_NAME });
-      sh.getRange(i + 2, C.THANKS).setValue('ส่งแล้ว ' + fmt_(new Date()));
+      sh.getRange(i + 2, C.THANKS).setValue('ส่งแล้ว ' + fmt_(new Date()) + (me ? ' (จาก ' + me + ')' : ''));
       sent++;
     } catch (err) {
       sh.getRange(i + 2, C.THANKS).setValue('ผิดพลาด: ' + String(err.message || err).slice(0, 60));
@@ -972,11 +978,15 @@ function sendPendingThanksLocked_() {
 function sendPendingThanksMenu() {
   var r = sendPendingThanks();
   if (r.busy) { SpreadsheetApp.getUi().alert('ระบบกำลังส่งอีเมลรอบอัตโนมัติอยู่ ลองใหม่อีกครั้งใน 1–2 นาที'); return; }
+  if (r.wrongSender) { SpreadsheetApp.getUi().alert('ไม่ได้ส่ง: ชีต ตั้งค่า กำหนด THANKS_SENDER ให้ส่งจากบัญชีอื่น\nบัญชีที่ใช้อยู่: ' + r.wrongSender); return; }
   SpreadsheetApp.getUi().alert('ส่งอีเมลขอบคุณแล้ว ' + r.sent + ' ฉบับ' + '\nส่งจากบัญชี: ' + Session.getEffectiveUser().getEmail() + (r.left ? '\nค้างอยู่ ' + r.left + ' ฉบับ (โควตาวันนี้หมด – เลือกเมนูนี้อีกครั้งพรุ่งนี้ หรือเปิดส่งอัตโนมัติ)' : '') +
     '\nโควตาอีเมลคงเหลือวันนี้: ' + r.quota);
 }
 
 function installThanksTrigger() {
+  var s0 = getSettings_(), me0 = '';
+  try { me0 = String(Session.getEffectiveUser().getEmail() || '').toLowerCase(); } catch (e) {}
+  if (s0.THANKS_SENDER && me0 && me0 !== s0.THANKS_SENDER) { SpreadsheetApp.getUi().alert('ไม่ได้เปิด: THANKS_SENDER ในชีต ตั้งค่า = ' + s0.THANKS_SENDER + '\nให้เปิดเมนูนี้จากบัญชีนั้น (ตอนนี้ใช้ ' + me0 + ')'); return; }
   removeThanksTrigger(true);
   ScriptApp.newTrigger('sendPendingThanks').timeBased().everyMinutes(5).create();
   SpreadsheetApp.getUi().alert('เปิดส่งอีเมลขอบคุณอัตโนมัติแล้ว\nอีเมลจะส่งจากบัญชี: ' + Session.getEffectiveUser().getEmail() + '\n(ทุก 5 นาที ส่งเท่าที่โควตาวันนี้เหลือ ที่เหลือจะส่งต่อวันถัดไปเอง)\nอย่าลืมตั้ง THANKS_EMAIL = TRUE ในชีต "ตั้งค่า"');
