@@ -989,7 +989,8 @@ function sendPendingThanksMenu() {
 /** ส่งอีเมล: THANKS_METHOD = GMAIL → ส่งผ่าน Gmail ของบัญชี (เหมือนกดส่งเอง) · อื่นๆ/ว่าง → MailApp */
 function sendMail_(s, to, subject, body, method) {
   var m = String(method || s.THANKS_METHOD || '').toUpperCase();
-  if (m === 'GMAIL') GmailApp.sendEmail(to, subject, body, { name: s.EVENT_NAME });
+  // GmailApp ทำให้อีโมจิในหัวเรื่องเพี้ยน (เช่น 🎁 → ������) จึงตัดอีโมจิออกจากหัวเรื่อง
+  if (m === 'GMAIL') GmailApp.sendEmail(to, String(subject).replace(/[\uD800-\uDFFF\uFE0F]/g, '').replace(/^\s+/, ''), body, { name: s.EVENT_NAME });
   else MailApp.sendEmail({ to: to, subject: subject, body: body, name: s.EVENT_NAME });
 }
 
