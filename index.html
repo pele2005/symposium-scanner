@@ -199,13 +199,14 @@
   function api(P) {
     var base = (cfg.api || '').split('?')[0];
     var qs = Object.keys(P).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(P[k]); }).join('&');
-    return fetchT(base + '?' + qs, 10000)
-      .catch(function () { showRetry(); return fetchT(base + '?' + qs, 12000); })
+    // ช่วงคนเยอะระบบต้องรอคิว 5–20 วินาที → รอนานขึ้นก่อนส่งใหม่ (ส่งซ้ำใช้ rid เดิม ระบบจะไม่ตัดสิทธิ์ซ้ำ)
+    return fetchT(base + '?' + qs, 20000)
+      .catch(function () { showRetry(); return fetchT(base + '?' + qs, 25000); })
       .catch(function () {
         return new Promise(function (resolve, reject) {
           var cb = 'cb' + Date.now() + Math.floor(Math.random() * 1e6);
           var sc = document.createElement('script');
-          var timer = setTimeout(function () { cleanup(); reject(new Error('หมดเวลาเชื่อมต่อ')); }, 15000);
+          var timer = setTimeout(function () { cleanup(); reject(new Error('หมดเวลาเชื่อมต่อ')); }, 30000);
           function cleanup() { clearTimeout(timer); delete window[cb]; if (sc.parentNode) sc.parentNode.removeChild(sc); }
           window[cb] = function (d) { cleanup(); resolve(d); };
           sc.onerror = function () { cleanup(); reject(new Error('เชื่อมต่อระบบไม่ได้')); };
@@ -215,7 +216,7 @@
       });
   }
 
-  function showRetry() { var b = document.getElementById('rBig'); if (busy && b) b.textContent = 'สัญญาณช้า กำลังลองใหม่…'; }
+  function showRetry() { var b = document.getElementById('rBig'); if (busy && b) b.textContent = 'ระบบกำลังรอคิว กำลังลองใหม่… อย่าเพิ่งสแกนซ้ำ'; }
   function newRid() { return cfg.lane + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7); }
   var video = document.getElementById('video'), stream = null, scanning = false, busy = false;
   var lastCode = '', lastAt = 0, detector = null, canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -254,6 +255,7 @@
       err.textContent = '';
       document.getElementById('setup').classList.remove('show');
       try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+      keepAwake();
       if (cfg.mode === 'hid') startHid(); else { document.body.classList.remove('hidmode'); startCam(); }
     }).catch(function (e) { document.getElementById('startBtn').disabled = false; err.textContent = 'เชื่อมต่อไม่ได้: ' + e.message; });
   }
@@ -293,6 +295,12 @@
       })
       .catch(function (e) { hint.textContent = IN_LINE ? 'เปิดจากในแอป LINE ใช้กล้องไม่ได้ – แตะ ⋮ มุมขวาบน → "เปิดในเบราว์เซอร์" (Chrome/Safari)' : 'เปิดกล้องไม่ได้ (' + e.name + ') – อนุญาตกล้องในเบราว์เซอร์ หรือพิมพ์รหัสด้านล่าง'; });
   }
+  // กันจอดับระหว่างใช้งาน (Wake Lock – Chrome Android / Safari iOS 16.4+)
+  var wakeLock = null;
+  function keepAwake() {
+    try { if ('wakeLock' in navigator && document.visibilityState === 'visible') navigator.wakeLock.request('screen').then(function (w) { wakeLock = w; }).catch(function () {}); } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && (scanning || hidActive)) keepAwake(); });
   function stopCam() { scanning = false; if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; } }
 
   // ตัวอ่าน QR สำรอง (iPhone / เบราว์เซอร์ที่ไม่มี BarcodeDetector): ตัดเฉพาะกลางภาพตามกรอบเล็ง แล้วขยาย
@@ -365,7 +373,7 @@
 
   function redeem(code) {
     busy = true;
-    showResult('busy', 'กำลังตรวจ…', '', code, '');
+    showResult('busy', 'กำลังตรวจ…', '', code, 'ช่วงคนเยอะอาจใช้เวลา 5–20 วินาที');
     api({ action: 'redeem', code: code, pin: cfg.pin, lane: cfg.lane, rid: newRid() }).then(function (r) {
       busy = false;
       if (!r) { showResult('warn', 'ไม่มีการตอบกลับ', '', code, 'ลองอีกครั้ง'); return; }
@@ -374,7 +382,7 @@
       else if (r.state === 'forced_now') { showResult('ok', '✅ ปล่อยผ่าน – มอบของได้', r.name, r.code, 'บันทึกแล้ว'); beep(true); bump(); }
       else if (r.state === 'already') { showResult('bad', '❌ รับไปแล้ว', r.name, r.code, 'เมื่อ ' + (r.at || '')); beep(false); }
       else if (r.state === 'notfound') { showResult('bad', '❌ ไม่พบรหัสนี้', '', r.code, 'ตรวจสอบบัตรกับเจ้าหน้าที่'); beep(false); }
-      else { showResult('warn', '⚠ ยังไม่ผ่าน', r.name, r.code, 'ให้ผู้เข้าร่วมสแกน QR ตอบคำถามก่อน', true); beep(false); }
+      else { showResult('warn', '⚠ ยังไม่ผ่าน', r.name, r.code, (r.why ? r.why + ' · ' : '') + (r.why && r.why.indexOf('ยังไม่พบคำตอบ') < 0 ? 'ตรวจกับแพทย์ก่อนปล่อยผ่าน' : 'ถ้าแพทย์เพิ่งกดส่ง ให้รอ 20 วินาทีแล้วสแกนใหม่'), true); beep(false); }
       addHist(r.state, r.code, r.name);
     }).catch(function (e) { busy = false; showResult('warn', 'เชื่อมต่อไม่ได้', '', code, e.message + ' – ลองใหม่'); });
   }
