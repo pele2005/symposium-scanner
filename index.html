@@ -79,7 +79,7 @@
   <div><label for="mode">วิธีอ่านบัตร</label>
     <select id="mode" onchange="modeHint()"><option value="cam">กล้องมือถือ/แท็บเล็ต</option><option value="hid">เครื่องสแกนบาร์โค้ด (DS2208/DS2278 ต่อ USB หรือ Bluetooth กับเครื่องนี้)</option></select></div>
   <div><label for="lane">Area ผู้แทน (ผู้ใช้เครื่องนี้)</label>
-    <select id="lane"><option value="">— เลือก Area —</option><optgroup label="ORT"><option value="2BA">2BA</option><option value="2BB">2BB</option><option value="2BC">2BC</option><option value="2BD">2BD</option><option value="2BE">2BE</option><option value="2BG">2BG</option><option value="2BH">2BH</option><option value="2BJ">2BJ</option><option value="2BK">2BK</option><option value="2BL">2BL</option><option value="2C">2C</option><option value="2E">2E</option><option value="2LN">2LN</option><option value="2LNE">2LNE</option><option value="2LS">2LS</option><option value="2MNE">2MNE</option><option value="2UN">2UN</option><option value="2UNE">2UNE</option><option value="2US">2US</option><option value="2W">2W</option></optgroup><option value="__other">ตำแหน่งอื่น (NSM / SM / PM ฯลฯ) – พิมพ์ชื่อ</option></select>
+    <select id="lane"><option value="">— ใส่ PIN แล้วรอรายชื่อ Area —</option><option value="__other">ตำแหน่งอื่น (NSM / SM / PM ฯลฯ) – พิมพ์ชื่อ</option></select>
     <input id="laneOther" placeholder="พิมพ์ตำแหน่ง + ชื่อ เช่น SM-Tanapon, NSM-Wuttipong, PM-Vimolphun" autocomplete="off" style="display:none;margin-top:8px"></div>
   <p id="modeHint" style="display:none">โหมดเครื่องสแกน: จับคู่เครื่องสแกนกับแท็บเล็ต/โน้ตบุ๊กเครื่องนี้ก่อน ตั้งคีย์บอร์ดระบบเป็นภาษาอังกฤษ (EN) · หน้านี้จะรับค่าจากเครื่องสแกนโดยตรง ไม่ต้องแตะจอ และคีย์บอร์ดบนจอจะไม่เด้ง</p>
   <div class="err" id="setupErr"></div>
@@ -184,6 +184,25 @@
     oth.style.display = sel.value === '__other' ? 'block' : 'none'; if (sel.value === '__other') oth.focus();
   });
   renderLanes(cfg.lanes);
+  // โหลดรายชื่อ Area ของงานนี้ทันทีที่ใส่ PIN (ไม่ต้องกด "เริ่มสแกน" ก่อน) – ใช้ ping ตัวเดิม ไม่ต้องแก้ Code.gs
+  var lanesReq = 0;
+  function loadLanes() {
+    var a = document.getElementById('api').value.trim(), pin = document.getElementById('pin').value.trim();
+    if (!pin || !/^https:\/\/script\.google\.com\/macros\//.test(a)) return;
+    var err = document.getElementById('setupErr'), my = ++lanesReq, sel = document.getElementById('lane');
+    if (!cfg.lanes) sel.options[0].textContent = 'กำลังโหลดรายชื่อ Area…';
+    cfg.api = a;
+    api({ action: 'ping', pin: pin }).then(function (r) {
+      if (my !== lanesReq) return;
+      if (!r.ok) { if (!cfg.lanes) sel.options[0].textContent = '— ใส่ PIN แล้วรอรายชื่อ Area —'; err.textContent = r.error || 'PIN ไม่ถูกต้อง'; return; }
+      err.textContent = '';
+      if (r.event) { document.getElementById('evName').textContent = r.event; document.getElementById('setupTitle').textContent = r.event + (r.team ? ' · ' + r.team : ''); }
+      if (r.lanes && r.lanes.length) { cfg.lanes = r.lanes; renderLanes(r.lanes); }
+    }).catch(function () { if (my === lanesReq && !cfg.lanes) sel.options[0].textContent = '— เลือก Area —'; });
+  }
+  document.getElementById('pin').addEventListener('change', loadLanes);
+  document.getElementById('api').addEventListener('change', function () { cfg.lanes = null; cfg.lane = ''; loadLanes(); });
+  if (cfg.pin && !cfg.lanes) loadLanes();
   document.getElementById('mode').value = cfg.mode || 'cam';
   function modeHint() { document.getElementById('modeHint').style.display = document.getElementById('mode').value === 'hid' ? 'block' : 'none'; }
   modeHint();
